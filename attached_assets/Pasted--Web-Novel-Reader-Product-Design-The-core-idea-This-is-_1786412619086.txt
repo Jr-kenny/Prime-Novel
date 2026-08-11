@@ -1,0 +1,108 @@
+# Web Novel Reader: Product Design
+
+## The core idea
+
+This is a reading app that happens to pull its content from Git. Nobody using it should ever feel that. The whole design is built around one bet: readers don't want a library management tool, they want to open the app and be reading within two taps, and they want their collection to feel lived-in rather than cataloged. Every decision below serves that.
+
+## Navigation: four destinations, nothing more
+
+A bottom tab bar with four tabs. No hamburger menu hiding half the app, no dashboard home tab that tries to summarize everything at once.
+
+1. **Reading** (default tab on launch)
+2. **Library**
+3. **Updates**
+4. **Discover**
+
+Sources live one level down, off a settings icon, not as a fifth tab. They are infrastructure, not a destination.
+
+## Reading (the default screen)
+
+Most apps open to a home screen that greets you and asks you to decide what to do. This one opens straight into whatever you were doing last, the way picking up a physical book opens straight to your bookmark.
+
+If there's a book in progress: full-bleed cover art at the top, title, a plain progress readout ("Chapter 142 of 210," or a percentage if the total is unknown), and one large primary action: **Continue**. Tapping it drops you at the exact scroll position you left, no intermediate screen.
+
+Below that, a horizontal row of other books currently in progress, ordered by recency, for readers juggling several novels at once (this is normal for the genre and the app should assume it, not treat it as an edge case). Tapping any of them swaps the primary card.
+
+First-time state: no book in progress yet, so this screen shows a quiet invitation toward Discover rather than an empty dashboard. Something closer to a blank page than a "no data" illustration.
+
+## Library
+
+This is where the 300-novel reader lives, so it has to hold up at scale. Default view is a compact list, not a grid of covers: small thumbnail, title, status, last-read time, a thin progress bar. Grid/cover view is available as a toggle for people who browse visually, but list is the default because at real scale, scanning matters more than looking pretty.
+
+The library is organized by reading state, not alphabetically or by add-date:
+
+- **New chapters** — followed novels with unread content waiting
+- **Continue** — in progress, no new chapters pending
+- **On hold**
+- **Plan to read**
+- **Completed**
+- **Abandoned**
+
+This maps to how a reader actually thinks about their shelf, not to how a database would sort it.
+
+A separate, low-key section surfaces novels **untouched for six months or more**. Not as guilt, not as a "clean up your library" nag, just a quiet resurfacing so forgotten books have a chance to be picked back up or consciously archived.
+
+Favorites get a subtle visual marker woven into the cover treatment (a corner accent, not a sticker badge). Users can also build their own shelves/tags on top of the status system ("weekend reads," "waiting for a better translation," whatever they actually use).
+
+Filter and sort by status, source, tag, last updated, last read, download state, alphabetical.
+
+## Updates
+
+A reverse-chronological feed, grouped by day: cover thumbnail, title, and either "3 new chapters" or "Chapter 210 available." Tapping an entry drops the reader straight into the first unread chapter, no extra step.
+
+Chapter revisions are handled differently from new chapters. If a chapter you've already read gets edited upstream, it does not show up with the same visual weight as new content, that would train readers to distrust the "new" signal. Instead it gets a quieter marker: "Chapter 87 was revised," optional to expand, easy to ignore.
+
+If a source is failing to check for updates, the affected novel's entry shows a calm, plain-language note ("Couldn't check for updates") instead of going silent or throwing an error. No git terminology anywhere in this feed, ever.
+
+A digest setting lets people following 50+ novels collapse notifications into one daily push instead of one per chapter.
+
+## Discover
+
+Search and browse across whatever sources are already added. Adding a new source happens inline here too: paste a link, the app treats it as "add this collection," not "clone this repository." The connect flow shows a checking state, then either the novels it contains or a plain explanation of what went wrong.
+
+Browsing surfaces genre/category, recently added, and popular within the user's own sources. There's no attempt to be a public storefront, this app doesn't own the content, it just makes what's already added to it discoverable.
+
+## The reader
+
+This is the screen the whole app exists to support, so it gets the most opinionated decisions.
+
+**Typography.** Generous margins, a controlled line length rather than edge-to-edge text, serif by default for the body with a one-tap switch to sans, and full control over size, line height, and paragraph spacing. This is a page, not a text view.
+
+**Themes.** Not a light/dark toggle. Paper (warm, sepia-leaning), true black (OLED), soft dark (dark gray rather than pure black, easier on the eyes over long sessions), and a custom theme option for anyone who wants to pick their own background and text color. A reading app's personality lives in its themes more than anywhere else.
+
+**Chrome.** Nothing but text by default. One tap brings up an overlay: chapter title and position at the top, previous/next chapter, a progress scrubber, table of contents, bookmark, and typography settings at the bottom. It fades in and out, it doesn't snap.
+
+**Ambient progress.** A hairline progress indicator stays faintly visible even with the overlay hidden, so there's always a sense of "how far in am I" without needing to summon the controls.
+
+**Chapter transitions.** Default is continuous scroll across chapter boundaries, closer to how this content is already read on the web, with a settings toggle for readers who prefer a hard stop and a "Next Chapter" tap between chapters. This is a real design bet and worth pushing back on if it's wrong for the audience.
+
+**Table of contents.** A slide-up sheet from within the reader, not a separate screen, showing every chapter with read/unread state and download status, quick-jumpable.
+
+**Bookmarks.** Distinct from the automatic "last position." A user can explicitly mark a specific spot or passage, viewable later in a bookmarks list. This is for readers who want to save a moment, not just resume a session.
+
+**Offline.** A chapter that isn't downloaded and can't be reached shows a calm inline message with an option to queue it for download, never a raw network error or a spinner that never resolves.
+
+## Sources (the machinery, kept out of sight)
+
+One level under settings. Screen is titled something like "Your Sources," never "Repositories."
+
+Each entry: a friendly name, a status (healthy, checking, error), when it last checked, how many novels it provides. Actions: enable/disable, refresh now, remove, view its novels.
+
+Error states explain themselves in plain language ("Can't reach this source" / "This link doesn't look valid") with an optional details disclosure for anyone technical enough to want it, but that's never the default view.
+
+## Onboarding
+
+No account wall up front. First run gets someone reading as fast as possible: a couple of quiet establishing screens (tone, not a feature tour), then straight into adding a first source, browsing what it contains, and opening a novel. If the person has a source link ready, this can take under a minute.
+
+*Assumption worth flagging: this assumes the library can live fully on-device without a required account. If sync across devices turns out to be a hard requirement, account creation would need to move earlier, and that changes this flow.*
+
+## Edge cases, handled explicitly
+
+- **A novel disappears from its source.** It stays in the user's library with reading history and progress intact, marked "no longer available from this source." If it's identifiable elsewhere among the user's other sources, offer to relink it. Never silently delete someone's history.
+- **A source breaks.** Affected novels show a quiet status, but anything already downloaded keeps working normally. Breakage never blocks reading.
+- **A chapter is revised after being read.** Covered above: quieter treatment than new content, never conflated with it.
+- **Offline.** Downloaded content reads perfectly with zero degradation. Only discovery and update-checking need a connection, and that boundary is communicated calmly, not as an error state.
+
+## Visual language
+
+Warm, quiet, paper-adjacent neutrals as the base (off-whites, ink-leaning near-blacks), with one confident accent color used sparingly, for unread indicators and primary actions, not scattered across a rainbow of status colors. Typography carries the identity more than icons or illustration do: a distinctive serif for headings and branding moments, a clean sans for UI chrome. Minimal iconography, no mascot, no decorative illustration, the book covers themselves supply the visual richness. Motion stays understated and physical, page-turn or soft cross-fade energy, not bouncy SaaS-card animation.
