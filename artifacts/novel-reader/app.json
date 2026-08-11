@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "Novel Reader",
+    "name": "Prime Novel",
     "slug": "novel-reader",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "novel-reader",
     "userInterfaceStyle": "automatic",
@@ -27,6 +27,7 @@
           "origin": "https://replit.com/"
         }
       ],
+      "expo-camera",
       "expo-font",
       "expo-web-browser"
     ],

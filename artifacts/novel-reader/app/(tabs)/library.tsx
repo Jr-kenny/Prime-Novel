@@ -1,81 +1,110 @@
-import { Feather } from '@expo/vector-icons';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
 import { router } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { FlatList, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BookCover } from '@/components/BookCover';
+import { ShelfGridCard } from '@/components/shelf-grid-card';
+import { ShelfListRow } from '@/components/shelf-list-row';
 import { ScreenHeader } from '@/components/ScreenHeader';
-import { useColors } from '@/hooks/useColors';
+import { useApp } from '@/context/AppContext';
 import { BookStatus, useReader } from '@/context/ReaderContext';
+import { useColors } from '@/hooks/useColors';
+import { splitShelfBooks } from '@/utils/shelves';
 
 const filters: Array<BookStatus | 'All'> = ['All', 'New chapters', 'Continue', 'On hold', 'Plan to read', 'Completed'];
 
 export default function LibraryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { books, toggleFavorite } = useReader();
-  const [filter, setFilter] = React.useState<BookStatus | 'All'>('All');
-  const visibleBooks = filter === 'All' ? books : books.filter((book) => book.status === filter);
+  const { width } = useWindowDimensions();
+  const { category } = useLocalSearchParams<{ category?: string }>();
+  const { settings } = useApp();
+  const { books, toggleFavorite, setActiveBook } = useReader();
+  const [filter, setFilter] = useState<BookStatus | 'All'>('All');
+  const visibleBooks = useMemo(() => {
+    const byStatus = filter === 'All' ? books : books.filter((book) => book.status === filter);
+    return category ? byStatus.filter((book) => book.genre === category) : byStatus;
+  }, [books, category, filter]);
+  const { priorityBooks, otherBooks } = splitShelfBooks(visibleBooks);
+  const showShelfLayout = settings.libraryLayout === 'shelf';
+  const gridCardWidth = Math.max(120, Math.floor((width - 44 - 14) / 2));
+  const openChapters = (bookId: string) => {
+    setActiveBook(bookId);
+    router.push('/chapters');
+  };
+
+  const listHeader = (
+    <>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
+        {filters.map((item) => (
+          <Pressable
+            key={item}
+            onPress={() => setFilter(item)}
+            style={({ pressed }) => [styles.filter, { backgroundColor: filter === item ? colors.foreground : colors.secondary, opacity: pressed ? 0.78 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] }]}
+          >
+            <Text style={[styles.filterText, { color: filter === item ? colors.background : colors.secondaryForeground }]}>{item}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+      {showShelfLayout && priorityBooks.length > 0 ? (
+        <>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Keep going</Text>
+            <Text style={[styles.sectionMeta, { color: colors.mutedForeground }]}>{priorityBooks.length} priority reads</Text>
+          </View>
+          <View style={styles.list}>
+            {priorityBooks.map((book, index) => (
+              <ShelfListRow key={book.id} book={book} index={index} onPress={() => openChapters(book.id)} onToggleFavorite={() => toggleFavorite(book.id)} />
+            ))}
+          </View>
+        </>
+      ) : null}
+      {visibleBooks.length === 0 ? <Text style={[styles.empty, { color: colors.mutedForeground }]}>Nothing in this part of your shelf yet.</Text> : null}
+      {showShelfLayout && otherBooks.length > 0 ? (
+        <View style={styles.anotherLookHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Another look</Text>
+          <Text style={[styles.sectionMeta, { color: colors.mutedForeground }]}>More from your shelf</Text>
+        </View>
+      ) : null}
+    </>
+  );
+
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <ScreenHeader eyebrow="Everything you keep" title="Library" action="search" />
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
-          {filters.map((item) => (
-            <Pressable key={item} onPress={() => setFilter(item)} style={[styles.filter, { backgroundColor: filter === item ? colors.foreground : colors.secondary }]}>
-              <Text style={[styles.filterText, { color: filter === item ? colors.background : colors.secondaryForeground }]}>{item}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-        <View style={styles.list}>
-          {visibleBooks.map((book) => (
-            <Pressable key={book.id} onPress={() => router.push('/reader')} style={({ pressed }) => [styles.bookRow, { borderBottomColor: colors.border, opacity: pressed ? 0.7 : 1 }]}>
-              <BookCover source={book.cover} width={58} height={82} favorite={book.favorite} />
-              <View style={styles.bookDetails}>
-                <View style={styles.titleRow}>
-                  <Text style={[styles.bookTitle, { color: colors.foreground }]} numberOfLines={1}>{book.title}</Text>
-                  <Pressable testID={`favorite-${book.id}`} hitSlop={10} onPress={() => toggleFavorite(book.id)}>
-                    <Feather name={book.favorite ? 'heart' : 'heart'} size={16} color={book.favorite ? colors.primary : colors.mutedForeground} />
-                  </Pressable>
-                </View>
-                <Text style={[styles.bookAuthor, { color: colors.mutedForeground }]}>{book.author}</Text>
-                <View style={styles.statusLine}>
-                  <Text style={[styles.bookStatus, { color: book.status === 'New chapters' ? colors.primary : colors.mutedForeground }]}>{book.status}</Text>
-                  <Text style={[styles.lastRead, { color: colors.mutedForeground }]}>{book.lastRead}</Text>
-                </View>
-                <View style={[styles.progressTrack, { backgroundColor: colors.secondary }]}><View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${book.progress}%` }]} /></View>
-              </View>
-            </Pressable>
-          ))}
-          {visibleBooks.length === 0 ? <Text style={[styles.empty, { color: colors.mutedForeground }]}>Nothing in this part of your shelf yet.</Text> : null}
-        </View>
-        <View style={[styles.resurface, { borderTopColor: colors.border }]}>
-          <Text style={[styles.resurfaceTitle, { color: colors.foreground }]}>Worth another look</Text>
-          <Text style={[styles.resurfaceCopy, { color: colors.mutedForeground }]}>A few stories have been quiet for a while. No pressure—just an open door.</Text>
-        </View>
-      </ScrollView>
+      <ScreenHeader eyebrow={category ?? 'Everything you keep'} title="Library" action="search" />
+      <FlatList
+        columnWrapperStyle={styles.gridRow}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
+        data={showShelfLayout ? otherBooks : visibleBooks}
+        keyExtractor={(book) => book.id}
+        ListFooterComponent={(
+          <View style={[styles.resurface, { borderTopColor: colors.border }]}>
+            <Text style={[styles.resurfaceTitle, { color: colors.foreground }]}>Worth another look</Text>
+            <Text style={[styles.resurfaceCopy, { color: colors.mutedForeground }]}>A few stories have been quiet for a while. No pressure, just an open door.</Text>
+          </View>
+        )}
+        ListHeaderComponent={listHeader}
+        numColumns={2}
+        renderItem={({ item, index }) => <ShelfGridCard book={item} index={index} onPress={() => openChapters(item.id)} width={gridCardWidth} />}
+        showsVerticalScrollIndicator={false}
+      />
     </View>
   );
 }
 
-import React from 'react';
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   filters: { paddingHorizontal: 22, gap: 8, paddingBottom: 20 },
   filter: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: 18 },
   filterText: { fontFamily: 'Inter_500Medium', fontSize: 11 },
+  sectionHeader: { paddingHorizontal: 22, marginTop: 4, marginBottom: 1, flexDirection: 'row', alignItems: 'baseline', gap: 10 },
+  anotherLookHeader: { paddingHorizontal: 22, marginTop: 32, marginBottom: 18, flexDirection: 'row', alignItems: 'baseline', gap: 10 },
+  sectionTitle: { fontFamily: 'Georgia', fontSize: 21 },
+  sectionMeta: { fontFamily: 'Inter_400Regular', fontSize: 12 },
   list: { paddingHorizontal: 22 },
-  bookRow: { flexDirection: 'row', gap: 15, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
-  bookDetails: { flex: 1, justifyContent: 'center' },
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  bookTitle: { flex: 1, fontFamily: 'Georgia', fontSize: 17 },
-  bookAuthor: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 4 },
-  statusLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 },
-  bookStatus: { fontFamily: 'Inter_600SemiBold', fontSize: 10 },
-  lastRead: { fontFamily: 'Inter_400Regular', fontSize: 10 },
-  progressTrack: { height: 3, marginTop: 7, borderRadius: 2, overflow: 'hidden' },
-  progressFill: { height: '100%', borderRadius: 2 },
+  gridRow: { paddingHorizontal: 22, justifyContent: 'space-between', gap: 14 },
   empty: { fontFamily: 'Georgia', fontSize: 17, textAlign: 'center', marginTop: 60, paddingHorizontal: 30 },
-  resurface: { marginHorizontal: 22, borderTopWidth: 1, marginTop: 28, paddingTop: 22 },
+  resurface: { marginHorizontal: 22, borderTopWidth: 1, marginTop: 12, paddingTop: 22 },
   resurfaceTitle: { fontFamily: 'Georgia', fontSize: 18 },
   resurfaceCopy: { fontFamily: 'Inter_400Regular', fontSize: 12, lineHeight: 18, marginTop: 7 },
 });

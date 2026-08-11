@@ -11,9 +11,21 @@ import {
   Inter_700Bold,
   useFonts,
 } from '@expo-google-fonts/inter';
+import {
+  AtkinsonHyperlegible_400Regular,
+  AtkinsonHyperlegible_700Bold,
+} from '@expo-google-fonts/atkinson-hyperlegible';
+import {
+  Merriweather_400Regular,
+  Merriweather_700Bold,
+} from '@expo-google-fonts/merriweather';
 import { Stack } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
+import { AppProvider } from '@/context/AppContext';
+import { CatalogProvider } from '@/context/CatalogContext';
 import { ReaderProvider } from '@/context/ReaderContext';
+import { useColors } from '@/hooks/useColors';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -21,10 +33,28 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
+  const colors = useColors();
+  const statusBarStyle = colors.background === '#171614' ? 'light' : 'dark';
+
   return (
-    <Stack screenOptions={{ headerBackTitle: 'Back' }}>
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-    </Stack>
+    <>
+      <StatusBar backgroundColor={colors.background} style={statusBarStyle} />
+      <Stack screenOptions={{ headerBackTitle: 'Back' }}>
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="chapters" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="novel" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="reader" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="downloads" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="history" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="categories" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="analytics" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="reader-settings" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="view-settings" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="update-settings" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="advanced" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="share-link" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+      </Stack>
+    </>
   );
 }
 
@@ -34,6 +64,10 @@ export default function RootLayout() {
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,
+    AtkinsonHyperlegible_400Regular,
+    AtkinsonHyperlegible_700Bold,
+    Merriweather_400Regular,
+    Merriweather_700Bold,
   });
 
   useEffect(() => {
@@ -48,13 +82,17 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
-          <ReaderProvider>
-            <GestureHandlerRootView style={{ flex: 1 }}>
-              <KeyboardProvider>
-                <RootLayoutNav />
-              </KeyboardProvider>
-            </GestureHandlerRootView>
-          </ReaderProvider>
+          <AppProvider>
+            <CatalogProvider>
+              <ReaderProvider>
+                <GestureHandlerRootView style={{ flex: 1 }}>
+                  <KeyboardProvider>
+                    <RootLayoutNav />
+                  </KeyboardProvider>
+                </GestureHandlerRootView>
+              </ReaderProvider>
+            </CatalogProvider>
+          </AppProvider>
         </QueryClientProvider>
       </ErrorBoundary>
     </SafeAreaProvider>

@@ -16,9 +16,10 @@ export function ScreenHeader({ eyebrow, title, action }: { eyebrow?: string; tit
       {action ? (
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel={action === 'settings' ? 'Open More' : 'Search novels'}
           testID={`header-${action}`}
           hitSlop={12}
-          onPress={() => (action === 'settings' ? router.push('/sources') : undefined)}
+          onPress={() => (action === 'settings' ? router.push('/more') : router.push('/discover'))}
           style={({ pressed }) => [styles.icon, { backgroundColor: colors.secondary, opacity: pressed ? 0.6 : 1 }]}
         >
           <Feather name={action === 'settings' ? 'sliders' : 'search'} size={18} color={colors.foreground} />

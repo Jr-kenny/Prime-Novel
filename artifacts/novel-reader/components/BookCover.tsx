@@ -1,11 +1,11 @@
 import { Image, StyleSheet, View } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 
-export function BookCover({ source, width, height, favorite = false }: { source: number; width: number; height: number; favorite?: boolean }) {
+export function BookCover({ source, width, height, favorite = false }: { source: number | string; width: number; height: number; favorite?: boolean }) {
   const colors = useColors();
   return (
     <View style={[styles.frame, { width, height, borderColor: colors.border }]}>
-      <Image source={source} style={StyleSheet.absoluteFill} resizeMode="cover" />
+      <Image source={typeof source === 'string' ? { uri: source } : source} style={StyleSheet.absoluteFill} resizeMode="cover" />
       {favorite ? <View style={[styles.corner, { borderTopColor: colors.primary }]} /> : null}
     </View>
   );

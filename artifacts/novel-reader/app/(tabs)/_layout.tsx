@@ -8,13 +8,16 @@ import { Tabs } from 'expo-router';
 import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
 import { SymbolView } from 'expo-symbols';
 
-// IMPORTANT: iOS 26 uses NativeTabs for native tabs with liquid glass support.
-// NativeTabs intentionally does NOT use custom design tokens — liquid glass
-// is a system-level appearance provided by iOS and cannot be overridden.
-// Custom brand colors are applied only on the ClassicTabLayout path (older iOS / Android / web).
 function NativeTabLayout() {
+  const colors = useColors();
+
   return (
-    <NativeTabs>
+    <NativeTabs
+      backgroundColor={colors.background}
+      iconColor={{ default: colors.mutedForeground, selected: colors.primary }}
+      labelStyle={{ default: { color: colors.mutedForeground }, selected: { color: colors.primary } }}
+      tintColor={colors.primary}
+    >
       <NativeTabs.Trigger name="index">
         <Icon sf={{ default: 'house', selected: 'house.fill' }} />
         <Label>Reading</Label>
@@ -23,13 +26,17 @@ function NativeTabLayout() {
         <Icon sf={{ default: 'books.vertical', selected: 'books.vertical.fill' }} />
         <Label>Library</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="discover">
+        <Icon sf={{ default: 'sparkle.magnifyingglass', selected: 'sparkle.magnifyingglass' }} />
+        <Label>Discover</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="updates">
         <Icon sf={{ default: 'bell', selected: 'bell.fill' }} />
         <Label>Updates</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="discover">
-        <Icon sf={{ default: 'sparkle.magnifyingglass', selected: 'sparkle.magnifyingglass' }} />
-        <Label>Discover</Label>
+      <NativeTabs.Trigger name="more">
+        <Icon sf={{ default: 'ellipsis.circle', selected: 'ellipsis.circle.fill' }} />
+        <Label>More</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -93,6 +100,13 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="discover"
+        options={{
+          title: 'Discover',
+          tabBarIcon: ({ color }) => isIOS ? <SymbolView name="sparkle.magnifyingglass" tintColor={color} size={24} /> : <Feather name="compass" size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="updates"
         options={{
           title: 'Updates',
@@ -100,10 +114,10 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
-        name="discover"
+        name="more"
         options={{
-          title: 'Discover',
-          tabBarIcon: ({ color }) => isIOS ? <SymbolView name="sparkle.magnifyingglass" tintColor={color} size={24} /> : <Feather name="compass" size={22} color={color} />,
+          title: 'More',
+          tabBarIcon: ({ color }) => isIOS ? <SymbolView name="ellipsis.circle" tintColor={color} size={24} /> : <Feather name="more-horizontal" size={22} color={color} />,
         }}
       />
     </Tabs>
