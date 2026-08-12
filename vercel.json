@@ -5,14 +5,22 @@
   "installCommand": "pnpm install --frozen-lockfile",
   "cleanUrls": true,
   "framework": null,
-  "redirects": [
+  "headers": [
     {
       "source": "/downloads/prime-novel-android.apk",
-      "destination": "https://expo.dev/artifacts/eas/Kndpei4ouptLmr1VcN2eLPyYFDh6uesjXVtKyPw8ySA.apk",
-      "permanent": false
+      "headers": [
+        {
+          "key": "Content-Disposition",
+          "value": "attachment; filename=\"Prime-Novel.apk\""
+        }
+      ]
     }
   ],
   "rewrites": [
+    {
+      "source": "/downloads/prime-novel-android.apk",
+      "destination": "https://expo.dev/artifacts/eas/Kndpei4ouptLmr1VcN2eLPyYFDh6uesjXVtKyPw8ySA.apk"
+    },
     {
       "source": "/app/_expo/:path*",
       "destination": "/_expo/:path*"
