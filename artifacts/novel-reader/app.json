@@ -15,9 +15,12 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
+      "bundleIdentifier": "com.primehouse.primenovel",
       "supportsTablet": false
     },
-    "android": {},
+    "android": {
+      "package": "com.primehouse.primenovel"
+    },
     "web": {
       "output": "single",
       "favicon": "./assets/images/icon.png"
