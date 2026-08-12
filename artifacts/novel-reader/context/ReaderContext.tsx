@@ -24,6 +24,7 @@ export type ReadingPosition = {
   chapter: number;
   verticalOffset: number;
   pageIndex: number;
+  chapterProgress: number;
 };
 
 export type BookChapter = {
@@ -126,11 +127,22 @@ function normalizeBooks(books: Book[]) {
   }));
 }
 
+function clampChapterProgress(value: number | undefined) {
+  return Math.max(0, Math.min(1, value ?? 0));
+}
+
+function bookProgressForPosition(book: Book, chapter: number, chapterProgress: number) {
+  const totalChapters = Math.max(book.totalChapters, 1);
+  const completedChapters = Math.max(0, Math.min(totalChapters, chapter - 1));
+  return Math.min(100, Math.round(((completedChapters + clampChapterProgress(chapterProgress)) / totalChapters) * 100));
+}
+
 function positionForBook(book: Book | undefined, position?: ReadingPosition): ReadingPosition {
-  return position ?? {
-    chapter: book?.chapter ?? 1,
-    verticalOffset: 0,
-    pageIndex: 0,
+  return {
+    chapter: position?.chapter ?? book?.chapter ?? 1,
+    verticalOffset: Math.max(0, position?.verticalOffset ?? 0),
+    pageIndex: Math.max(0, position?.pageIndex ?? 0),
+    chapterProgress: clampChapterProgress(position?.chapterProgress),
   };
 }
 
@@ -140,16 +152,12 @@ function chapterPositionKey(bookId: string, chapter: number) {
 
 function positionForChapter(book: Book | undefined, positions: Record<string, ReadingPosition>, chapter: number): ReadingPosition {
   const chapterPosition = book ? positions[chapterPositionKey(book.id, chapter)] : undefined;
-  if (chapterPosition) return chapterPosition;
+  if (chapterPosition) return positionForBook(book, chapterPosition);
 
   const legacyPosition = book ? positions[book.id] : undefined;
-  if (legacyPosition?.chapter === chapter) return legacyPosition;
+  if (legacyPosition?.chapter === chapter) return positionForBook(book, legacyPosition);
 
-  return {
-    chapter,
-    verticalOffset: 0,
-    pageIndex: 0,
-  };
+  return positionForBook(book, { chapter, verticalOffset: 0, pageIndex: 0, chapterProgress: 0 });
 }
 
 const ReaderContext = createContext<ReaderContextValue | null>(null);
@@ -268,7 +276,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       return {
         ...book,
         chapter,
-        progress: Math.max(book.progress, Math.round((chapter / book.totalChapters) * 100)),
+        progress: Math.max(book.progress, bookProgressForPosition(book, chapter, positionForChapter(book, snapshotRef.current.positions, chapter).chapterProgress)),
         lastRead: 'Just now',
         status: book.status === 'New chapters' ? ('Continue' as BookStatus) : book.status,
       };
@@ -288,6 +296,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
           ? {
               ...book,
               status: 'Completed' as BookStatus,
+              progress: 100,
               readChapters: Array.from(new Set([...(book.readChapters ?? []), currentBook.chapter])),
               lastRead: 'Just now',
             }
@@ -304,7 +313,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         ? {
             ...book,
             chapter: nextChapter,
-            progress: Math.min(book.progress + 1, 100),
+            progress: Math.max(book.progress, bookProgressForPosition(book, nextChapter, 0)),
             lastRead: 'Just now',
             status: book.status === 'New chapters' ? 'Continue' : book.status,
             readChapters: Array.from(new Set([...(book.readChapters ?? []), currentBook.chapter])),
@@ -313,8 +322,8 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     );
     const nextPositions = {
       ...snapshotRef.current.positions,
-      [chapterPositionKey(currentBook.id, nextChapter)]: { chapter: nextChapter, verticalOffset: 0, pageIndex: 0 },
-      [currentBook.id]: { chapter: nextChapter, verticalOffset: 0, pageIndex: 0 },
+      [chapterPositionKey(currentBook.id, nextChapter)]: { chapter: nextChapter, verticalOffset: 0, pageIndex: 0, chapterProgress: 0 },
+      [currentBook.id]: { chapter: nextChapter, verticalOffset: 0, pageIndex: 0, chapterProgress: 0 },
     };
     setBooks(nextBooks);
     setReadingPositions(nextPositions);
@@ -324,16 +333,25 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
 
   const markChapterRead = (chapter = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId)?.chapter) => {
     if (!chapter) return;
+    const activeBook = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId);
+    if (!activeBook) return;
+    const nextPosition = { ...positionForChapter(activeBook, snapshotRef.current.positions, chapter), chapterProgress: 1 };
+    const nextPositions = {
+      ...snapshotRef.current.positions,
+      [chapterPositionKey(activeBook.id, chapter)]: nextPosition,
+    };
     const nextBooks = snapshotRef.current.books.map((book) => {
       if (book.id !== snapshotRef.current.activeId) return book;
       return {
         ...book,
+        progress: Math.max(book.progress, bookProgressForPosition(book, chapter, 1)),
         readChapters: Array.from(new Set([...(book.readChapters ?? []), chapter])),
         status: chapter >= book.totalChapters ? ('Completed' as BookStatus) : book.status,
       };
     });
     setBooks(nextBooks);
-    writeSnapshot({ books: nextBooks });
+    setReadingPositions(nextPositions);
+    writeSnapshot({ books: nextBooks, positions: nextPositions });
   };
 
   const markChapterUnread = (chapter = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId)?.chapter) => {
@@ -391,14 +409,21 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       ...positionForChapter(book, snapshotRef.current.positions, chapter),
       ...position,
       chapter,
+      chapterProgress: clampChapterProgress(position.chapterProgress ?? positionForChapter(book, snapshotRef.current.positions, chapter).chapterProgress),
     };
     const nextPositions = {
       ...snapshotRef.current.positions,
       [chapterPositionKey(bookId, chapter)]: nextPosition,
       [bookId]: nextPosition,
     };
+    const nextBooks = book
+      ? snapshotRef.current.books.map((item) => item.id === bookId
+        ? { ...item, progress: Math.max(item.progress, bookProgressForPosition(item, chapter, nextPosition.chapterProgress)) }
+        : item)
+      : snapshotRef.current.books;
+    setBooks(nextBooks);
     setReadingPositions(nextPositions);
-    writeSnapshot({ positions: nextPositions });
+    writeSnapshot({ books: nextBooks, positions: nextPositions });
   };
 
   const activeBook = books.find((book) => book.id === activeId) ?? books[0];

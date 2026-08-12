@@ -79,7 +79,7 @@ function rankSearchResults(novels: PrimeNovel[], query: string) {
 }
 
 export function CatalogProvider({ children }: { children: React.ReactNode }) {
-  const { sources } = useApp();
+  const { settings, sources } = useApp();
   const [results, setResults] = useState<PrimeNovel[]>([]);
   const [sourceResults, setSourceResults] = useState<PrimeSourceSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -182,19 +182,36 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     chapters: PrimeChapter[],
     onProgress?: (completed: number, total: number, failed: number) => void,
   ) => {
+    if (chapters.length === 0) return { downloaded: 0, failed: 0, total: 0 };
+
+    const requestedConcurrency = Number(settings.downloadConcurrency);
+    const concurrency = Number.isFinite(requestedConcurrency)
+      ? Math.max(1, Math.min(12, Math.floor(requestedConcurrency)))
+      : 1;
+    const workerCount = Math.min(concurrency, chapters.length);
+    let nextIndex = 0;
     let downloaded = 0;
     let failed = 0;
-    for (const chapter of chapters) {
-      try {
-        await downloadChapter(novel, chapter);
-        downloaded += 1;
-      } catch {
-        failed += 1;
+
+    const worker = async () => {
+      while (true) {
+        const chapterIndex = nextIndex;
+        nextIndex += 1;
+        if (chapterIndex >= chapters.length) return;
+
+        try {
+          await downloadChapter(novel, chapters[chapterIndex]);
+          downloaded += 1;
+        } catch {
+          failed += 1;
+        }
+        onProgress?.(downloaded + failed, chapters.length, failed);
       }
-      onProgress?.(downloaded + failed, chapters.length, failed);
-    }
+    };
+
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
     return { downloaded, failed, total: chapters.length };
-  }, [downloadChapter]);
+  }, [downloadChapter, settings.downloadConcurrency]);
 
   const removeDownload = useCallback((key: string) => {
     persistDownloads(downloadsRef.current.filter((download) => download.key !== key));

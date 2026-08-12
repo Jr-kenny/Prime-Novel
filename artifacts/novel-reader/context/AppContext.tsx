@@ -6,12 +6,13 @@ import { downloadSourcePackage } from '@/utils/source-download';
 import { PRIME_SOURCE_REGISTRY } from '@/data/prime-sources';
 
 export type LibraryLayout = 'shelf' | 'grid';
-export type UpdateFrequency = 'manual' | 'hourly' | 'daily';
+export type UpdateFrequency = 'off' | 'hourly' | 'daily';
 export type AppTheme = 'cream' | 'white' | 'dark';
 
 export type AppSettings = {
   appTheme: AppTheme;
   autoBookmarkFromShare: boolean;
+  downloadConcurrency: number;
   downloadOnUpdate: boolean;
   libraryLayout: LibraryLayout;
   onlyUpdateOngoing: boolean;
@@ -77,6 +78,7 @@ type AppSnapshot = {
   availableSources: AvailableSource[];
   sharedLinks: string[];
   history: HistoryEntry[];
+  recentSearches: string[];
   readingSessions: ReadingSession[];
 };
 
@@ -86,6 +88,7 @@ type AppContextValue = AppSnapshot & {
   clearSourceCache: () => void;
   installSource: (sourceId: string) => Promise<boolean>;
   recordHistory: (entry: Omit<HistoryEntry, 'id' | 'openedAt'>) => void;
+  recordRecentSearch: (query: string) => void;
   recordReadingSession: (bookId: string, durationMs: number, words: number) => void;
   removeRepository: (repositoryId: string) => void;
   removeSource: (sourceId: string) => void;
@@ -99,6 +102,7 @@ type AppContextValue = AppSnapshot & {
 const defaultSettings: AppSettings = {
   appTheme: 'cream',
   autoBookmarkFromShare: true,
+  downloadConcurrency: 3,
   downloadOnUpdate: false,
   libraryLayout: 'shelf',
   onlyUpdateOngoing: true,
@@ -131,6 +135,7 @@ const initialSnapshot: AppSnapshot = {
   availableSources: [],
   sharedLinks: [],
   history: [],
+  recentSearches: [],
   readingSessions: [],
 };
 
@@ -143,6 +148,16 @@ function parseJson<T>(value: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function normalizeSettings(stored: Partial<AppSettings>) {
+  const storedFrequency = (stored as { updateFrequency?: string }).updateFrequency;
+  const updateFrequency: UpdateFrequency = storedFrequency === 'hourly' || storedFrequency === 'daily'
+    ? storedFrequency
+    : storedFrequency === 'manual' || storedFrequency === 'off'
+      ? 'off'
+      : defaultSettings.updateFrequency;
+  return { ...defaultSettings, ...stored, updateFrequency };
 }
 
 function normalizeSources(stored: SourceRecord[]) {
@@ -175,20 +190,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [availableSources, setAvailableSources] = useState<AvailableSource[]>([]);
   const [sharedLinks, setSharedLinks] = useState<string[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [readingSessions, setReadingSessions] = useState<ReadingSession[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const launchSyncStarted = useRef(false);
 
   useEffect(() => {
-    AsyncStorage.multiGet(['prime-settings', 'prime-sources', 'prime-repositories', 'prime-available-sources', 'prime-shared-links', 'prime-history', 'prime-reading-sessions'])
+    AsyncStorage.multiGet(['prime-settings', 'prime-sources', 'prime-repositories', 'prime-available-sources', 'prime-shared-links', 'prime-history', 'prime-recent-searches', 'prime-reading-sessions'])
       .then((entries) => {
-        setSettings({ ...defaultSettings, ...parseJson<Partial<AppSettings>>(entries[0][1], {}) });
+        setSettings(normalizeSettings(parseJson<Partial<AppSettings>>(entries[0][1], {})));
         setSources(normalizeSources(parseJson<SourceRecord[]>(entries[1][1], defaultSources)));
         setRepositories(parseJson<RepositoryRecord[]>(entries[2][1], defaultRepositories));
         setAvailableSources(parseJson<AvailableSource[]>(entries[3][1], []));
         setSharedLinks(parseJson<string[]>(entries[4][1], []));
         setHistory(parseJson<HistoryEntry[]>(entries[5][1], []));
-        setReadingSessions(parseJson<ReadingSession[]>(entries[6][1], []));
+        setRecentSearches(parseJson<string[]>(entries[6][1], []));
+        setReadingSessions(parseJson<ReadingSession[]>(entries[7][1], []));
       })
       .finally(() => setHydrated(true));
   }, []);
@@ -200,6 +217,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (next.availableSources) void AsyncStorage.setItem('prime-available-sources', JSON.stringify(next.availableSources));
     if (next.sharedLinks) void AsyncStorage.setItem('prime-shared-links', JSON.stringify(next.sharedLinks));
     if (next.history) void AsyncStorage.setItem('prime-history', JSON.stringify(next.history));
+    if (next.recentSearches) void AsyncStorage.setItem('prime-recent-searches', JSON.stringify(next.recentSearches));
     if (next.readingSessions) void AsyncStorage.setItem('prime-reading-sessions', JSON.stringify(next.readingSessions));
   }, []);
 
@@ -403,6 +421,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, [persist]);
 
+  const recordRecentSearch = useCallback((rawQuery: string) => {
+    const query = rawQuery.trim().replace(/\s+/g, ' ');
+    if (!query) return;
+    setRecentSearches((current) => {
+      const normalizedQuery = query.toLocaleLowerCase();
+      const next = [query, ...current.filter((item) => item.toLocaleLowerCase() !== normalizedQuery)].slice(0, 10);
+      persist({ recentSearches: next });
+      return next;
+    });
+  }, [persist]);
+
   const recordReadingSession = useCallback((bookId: string, durationMs: number, words: number) => {
     if (durationMs <= 0) return;
     const session: ReadingSession = {
@@ -426,12 +455,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     availableSources,
     sharedLinks,
     history,
+    recentSearches,
     readingSessions,
     addRepository,
     addShareLink,
     clearSourceCache,
     installSource,
     recordHistory,
+    recordRecentSearch,
     recordReadingSession,
     removeRepository,
     removeSource,
@@ -440,7 +471,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     toggleRepository,
     toggleSource,
     hydrated,
-  }), [addRepository, addShareLink, availableSources, clearSourceCache, hydrated, history, installSource, recordHistory, recordReadingSession, removeRepository, removeSource, readingSessions, repositories, setSetting, settings, sharedLinks, sources, syncSources, toggleRepository, toggleSource]);
+  }), [addRepository, addShareLink, availableSources, clearSourceCache, hydrated, history, installSource, recordHistory, recordRecentSearch, recordReadingSession, recentSearches, removeRepository, removeSource, readingSessions, repositories, setSetting, settings, sharedLinks, sources, syncSources, toggleRepository, toggleSource]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

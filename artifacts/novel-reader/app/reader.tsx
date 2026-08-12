@@ -81,6 +81,11 @@ function initialHorizontalChapters(chapter: number, totalChapters: number) {
   return Array.from({ length: lastChapter - firstChapter + 1 }, (_, index) => firstChapter + index);
 }
 
+function scrollProgress(offset: number, maxOffset: number) {
+  if (maxOffset <= 0) return 0;
+  return Math.max(0, Math.min(1, offset / maxOffset));
+}
+
 function Stepper({
   label,
   value,
@@ -421,6 +426,10 @@ export default function ReaderScreen() {
   const horizontalChapterRefs = useRef<Record<number, ScrollView | null>>({});
   const horizontalChapterReachedEndRef = useRef<Set<number>>(new Set());
   const verticalChapterOffsetsRef = useRef<Record<number, number>>({});
+  const verticalContentHeightRef = useRef(0);
+  const verticalViewportHeightRef = useRef(0);
+  const horizontalChapterContentHeightsRef = useRef<Record<number, number>>({});
+  const horizontalChapterViewportHeightsRef = useRef<Record<number, number>>({});
   const restoredHorizontalPositionsRef = useRef<Set<string>>(new Set());
   const restoringHorizontalPositionsRef = useRef<Set<string>>(new Set());
   const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
@@ -541,6 +550,10 @@ export default function ReaderScreen() {
     horizontalChapterRefs.current = {};
     horizontalChapterReachedEndRef.current.clear();
     verticalChapterOffsetsRef.current = {};
+    verticalContentHeightRef.current = 0;
+    verticalViewportHeightRef.current = 0;
+    horizontalChapterContentHeightsRef.current = {};
+    horizontalChapterViewportHeightsRef.current = {};
     restoredHorizontalPositionsRef.current.clear();
     restoringHorizontalPositionsRef.current.clear();
     hasScrolledRef.current = false;
@@ -558,6 +571,8 @@ export default function ReaderScreen() {
       restoredHorizontalPositionsRef.current.clear();
       restoringHorizontalPositionsRef.current.clear();
       horizontalChapterReachedEndRef.current.clear();
+      horizontalChapterContentHeightsRef.current = {};
+      horizontalChapterViewportHeightsRef.current = {};
       return;
     }
 
@@ -570,7 +585,6 @@ export default function ReaderScreen() {
 
   useEffect(() => {
     if (!hydrated) return;
-    const position = getReadingPosition(activeBook.id, activeBook.chapter);
     requestAnimationFrame(() => {
       if (readerPreferences.mode === 'horizontal') {
         const currentIndex = horizontalItems.findIndex((chapter) => chapter === activeBook.chapter);
@@ -578,9 +592,9 @@ export default function ReaderScreen() {
         horizontalPageIndexRef.current = currentIndex;
         setHorizontalPageIndex(currentIndex);
         horizontalRef.current?.scrollTo({ x: currentIndex * pageWidth, animated: false });
-        horizontalChapterRefs.current[activeBook.chapter]?.scrollTo({ y: position.verticalOffset, animated: false });
+        restoreHorizontalChapter(activeBook.chapter);
       } else {
-        verticalRef.current?.scrollTo({ y: position.verticalOffset, animated: false });
+        restoreVerticalPosition();
       }
     });
   }, [hydrated, activeBook.id, horizontalItems, pageWidth, readerPreferences.mode]);
@@ -654,12 +668,35 @@ export default function ReaderScreen() {
     };
   }, [readerPreferences.lockRotation]);
 
-  const savePosition = (chapter: number, position: Partial<{ verticalOffset: number; pageIndex: number }>) => {
+  const savePosition = (chapter: number, position: Partial<{ verticalOffset: number; pageIndex: number; chapterProgress: number }>) => {
     const now = Date.now();
     if (now - lastPositionWriteRef.current < 220 && position.verticalOffset !== undefined && lastPositionChapterRef.current === chapter) return;
     lastPositionWriteRef.current = now;
     lastPositionChapterRef.current = chapter;
     saveReadingPosition({ chapter, ...position }, activeBook.id);
+  };
+
+  const restoreVerticalPosition = () => {
+    const position = getReadingPosition(activeBook.id, activeBook.chapter);
+    const chapterTop = verticalChapterOffsetsRef.current[activeBook.chapter] ?? 0;
+    const followingChapter = loadedChapters
+      .filter((chapter) => chapter > activeBook.chapter)
+      .sort((left, right) => left - right)[0];
+    const contentHeight = verticalContentHeightRef.current;
+    const viewportHeight = verticalViewportHeightRef.current;
+    const chapterEnd = followingChapter === undefined
+      ? contentHeight
+      : verticalChapterOffsetsRef.current[followingChapter] ?? contentHeight;
+    const chapterMaxOffset = contentHeight > 0 && viewportHeight > 0
+      ? Math.max(0, chapterEnd - chapterTop - viewportHeight)
+      : 0;
+    const chapterOffset = position.chapterProgress > 0 && chapterMaxOffset > 0
+      ? chapterMaxOffset * position.chapterProgress
+      : position.verticalOffset;
+
+    requestAnimationFrame(() => {
+      verticalRef.current?.scrollTo({ y: Math.max(0, chapterTop + chapterOffset), animated: false });
+    });
   };
 
   const advanceToNextChapter = () => {
@@ -695,7 +732,15 @@ export default function ReaderScreen() {
       setActiveChapter(currentChapter);
     }
     const chapterTop = verticalChapterOffsetsRef.current[currentChapter] ?? 0;
-    if (!suppressVerticalSaveRef.current) savePosition(currentChapter, { verticalOffset: Math.max(0, offset - chapterTop) });
+    const followingChapter = loadedChapters
+      .filter((chapter) => chapter > currentChapter)
+      .sort((left, right) => left - right)[0];
+    const chapterEnd = followingChapter === undefined
+      ? contentSize.height
+      : verticalChapterOffsetsRef.current[followingChapter] ?? contentSize.height;
+    const chapterMaxOffset = Math.max(1, chapterEnd - chapterTop - layoutMeasurement.height);
+    const chapterOffset = Math.max(0, offset - chapterTop);
+    if (!suppressVerticalSaveRef.current) savePosition(currentChapter, { verticalOffset: chapterOffset, chapterProgress: scrollProgress(chapterOffset, chapterMaxOffset) });
     const reachedEnd = contentSize.height > layoutMeasurement.height + 40 && offset + layoutMeasurement.height >= contentSize.height - 80;
     if (hasScrolledRef.current && reachedEnd) {
       if (hasNextChapter) {
@@ -711,18 +756,33 @@ export default function ReaderScreen() {
     const offset = Math.max(0, event.nativeEvent.contentOffset.y);
     const currentChapter = visibleVerticalChapter(offset);
     const chapterTop = verticalChapterOffsetsRef.current[currentChapter] ?? 0;
-    savePosition(currentChapter, { verticalOffset: Math.max(0, offset - chapterTop) });
+    const followingChapter = loadedChapters
+      .filter((chapter) => chapter > currentChapter)
+      .sort((left, right) => left - right)[0];
+    const chapterEnd = followingChapter === undefined
+      ? event.nativeEvent.contentSize.height
+      : verticalChapterOffsetsRef.current[followingChapter] ?? event.nativeEvent.contentSize.height;
+    const chapterMaxOffset = Math.max(1, chapterEnd - chapterTop - event.nativeEvent.layoutMeasurement.height);
+    const chapterOffset = Math.max(0, offset - chapterTop);
+    savePosition(currentChapter, { verticalOffset: chapterOffset, chapterProgress: scrollProgress(chapterOffset, chapterMaxOffset) });
   };
 
   const restoreHorizontalChapter = (chapter: number) => {
     if (!hydrated || !horizontalChapterRefs.current[chapter]) return;
     const positionKey = `${activeBook.id}:${chapter}`;
     if (restoredHorizontalPositionsRef.current.has(positionKey)) return;
+    const contentHeight = horizontalChapterContentHeightsRef.current[chapter] ?? 0;
+    const viewportHeight = horizontalChapterViewportHeightsRef.current[chapter] ?? 0;
+    if (contentHeight <= 0 || viewportHeight <= 0) return;
     const position = getReadingPosition(activeBook.id, chapter);
+    const maxOffset = Math.max(0, contentHeight - viewportHeight);
+    const offset = position.chapterProgress > 0 && maxOffset > 0
+      ? maxOffset * position.chapterProgress
+      : position.verticalOffset;
     restoredHorizontalPositionsRef.current.add(positionKey);
     restoringHorizontalPositionsRef.current.add(positionKey);
     requestAnimationFrame(() => {
-      horizontalChapterRefs.current[chapter]?.scrollTo({ y: position.verticalOffset, animated: false });
+      horizontalChapterRefs.current[chapter]?.scrollTo({ y: Math.max(0, offset), animated: false });
       setTimeout(() => restoringHorizontalPositionsRef.current.delete(positionKey), 120);
     });
   };
@@ -731,7 +791,8 @@ export default function ReaderScreen() {
     const positionKey = `${activeBook.id}:${chapter}`;
     if (restoringHorizontalPositionsRef.current.has(positionKey)) return;
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    savePosition(chapter, { verticalOffset: Math.max(0, contentOffset.y) });
+    const chapterOffset = Math.max(0, contentOffset.y);
+    savePosition(chapter, { verticalOffset: chapterOffset, chapterProgress: scrollProgress(chapterOffset, contentSize.height - layoutMeasurement.height) });
     const reachedEnd = contentSize.height > layoutMeasurement.height + 40 && contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
     if (reachedEnd) horizontalChapterReachedEndRef.current.add(chapter);
     if (chapter === activeBook.totalChapters && reachedEnd && finalChapterMarkedRef.current !== chapter) {
@@ -741,7 +802,9 @@ export default function ReaderScreen() {
   };
 
   const handleHorizontalChapterScrollEnd = (chapter: number, event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    savePosition(chapter, { verticalOffset: Math.max(0, event.nativeEvent.contentOffset.y) });
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const chapterOffset = Math.max(0, contentOffset.y);
+    savePosition(chapter, { verticalOffset: chapterOffset, chapterProgress: scrollProgress(chapterOffset, contentSize.height - layoutMeasurement.height) });
   };
 
   const handleHorizontalPageEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -858,6 +921,14 @@ export default function ReaderScreen() {
           contentContainerStyle={{ paddingHorizontal: readerPreferences.margins, paddingTop: readerContentTopPadding, paddingBottom: readerContentBottomPadding }}
           onScroll={handleVerticalScroll}
           onScrollEndDrag={handleVerticalScrollEnd}
+          onContentSizeChange={(_, height) => {
+            verticalContentHeightRef.current = height;
+            restoreVerticalPosition();
+          }}
+          onLayout={(event) => {
+            verticalViewportHeightRef.current = event.nativeEvent.layout.height;
+            restoreVerticalPosition();
+          }}
           onTouchEnd={handleReadingTouchEnd}
           onTouchStart={handleReadingTouchStart}
           ref={verticalRef}
@@ -906,7 +977,14 @@ export default function ReaderScreen() {
                   contentContainerStyle={{ paddingHorizontal: readerPreferences.margins, paddingTop: readerContentTopPadding, paddingBottom: readerContentBottomPadding }}
                   directionalLockEnabled
                   nestedScrollEnabled
-                  onContentSizeChange={() => restoreHorizontalChapter(chapter)}
+                  onContentSizeChange={(_, height) => {
+                    horizontalChapterContentHeightsRef.current[chapter] = height;
+                    restoreHorizontalChapter(chapter);
+                  }}
+                  onLayout={(event) => {
+                    horizontalChapterViewportHeightsRef.current[chapter] = event.nativeEvent.layout.height;
+                    restoreHorizontalChapter(chapter);
+                  }}
                   onScroll={(event) => handleHorizontalChapterScroll(chapter, event)}
                   onScrollEndDrag={(event) => handleHorizontalChapterScrollEnd(chapter, event)}
                   ref={(reference) => {

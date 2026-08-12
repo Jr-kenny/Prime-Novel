@@ -6,7 +6,7 @@ export function BookCover({ source, width, height, favorite = false }: { source:
   return (
     <View style={[styles.frame, { width, height, borderColor: colors.border }]}>
       <Image source={typeof source === 'string' ? { uri: source } : source} style={StyleSheet.absoluteFill} resizeMode="cover" />
-      {favorite ? <View style={[styles.corner, { borderTopColor: colors.primary }]} /> : null}
+      {favorite ? <View style={[styles.corner, { borderTopColor: colors.destructive }]} /> : null}
     </View>
   );
 }

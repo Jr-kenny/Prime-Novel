@@ -1,5 +1,5 @@
 import { Feather } from '@expo/vector-icons';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,14 +8,18 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { useColors } from '@/hooks/useColors';
 import { useReader } from '@/context/ReaderContext';
 import { useCatalog } from '@/context/CatalogContext';
+import { useApp } from '@/context/AppContext';
 import type { PrimeNovel } from '@/utils/prime-source-adapters';
 
 export default function DiscoverScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const { books, setActiveBook } = useReader();
+  const { recentSearches, recordRecentSearch } = useApp();
   const { results, searching, search, searchError, clearResults } = useCatalog();
   const [query, setQuery] = useState('');
+  const recentSearchCardWidth = Math.max(76, Math.floor((windowWidth - 44 - 20) / 3));
 
   useEffect(() => {
     const trimmedQuery = query.trim();
@@ -30,8 +34,18 @@ export default function DiscoverScreen() {
   }, [clearResults, query, search]);
 
   const submitSearch = () => {
-    if (query.trim().length < 1) return;
-    void search(query);
+    const trimmedQuery = query.trim();
+    if (trimmedQuery.length < 1) return;
+    recordRecentSearch(trimmedQuery);
+    void search(trimmedQuery);
+  };
+
+  const openRecentSearch = (recentQuery: string) => {
+    if (query.trim() === recentQuery) {
+      void search(recentQuery);
+      return;
+    }
+    setQuery(recentQuery);
   };
 
   const openNovel = (novel: PrimeNovel) => {
@@ -90,22 +104,56 @@ export default function DiscoverScreen() {
             {!searching && results.length === 0 && !searchError ? <Text style={[styles.empty, { color: colors.mutedForeground }]}>No novels found.</Text> : null}
           </>
         ) : (
-          books.length > 0 ? (
-            <>
-              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>From your library</Text>
-              <View style={styles.coverGrid}>
-                {books.map((book) => (
-                  <Pressable key={book.id} onPress={() => { setActiveBook(book.id); router.push('/chapters'); }} style={({ pressed }) => [styles.discoverBook, { opacity: pressed ? 0.7 : 1 }]}>
-                    <BookCover source={book.cover} width={112} height={164} favorite={book.favorite} />
-                    <Text style={[styles.bookTitle, { color: colors.foreground }]} numberOfLines={2}>{book.title}</Text>
-                    <Text style={[styles.bookGenre, { color: colors.mutedForeground }]}>{book.genre}</Text>
-                  </Pressable>
-                ))}
+          <>
+            {recentSearches.length > 0 ? (
+              <View style={styles.recentSection}>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={[styles.sectionTitle, styles.sectionTitleInset, { color: colors.foreground }]}>Recent searches</Text>
+                  <Text style={[styles.sectionMeta, { color: colors.mutedForeground }]}>{recentSearches.length}/10</Text>
+                </View>
+                <ScrollView
+                  contentContainerStyle={styles.recentSearchContent}
+                  decelerationRate="fast"
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  snapToAlignment="start"
+                  snapToInterval={recentSearchCardWidth + 10}
+                >
+                  {recentSearches.map((recentQuery) => (
+                    <Pressable
+                      accessibilityLabel={`Search again for ${recentQuery}`}
+                      key={recentQuery}
+                      onPress={() => openRecentSearch(recentQuery)}
+                      style={({ pressed }) => [styles.recentSearchCard, { width: recentSearchCardWidth, backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}
+                    >
+                      <View style={styles.recentSearchIconRow}>
+                        <Feather name="clock" size={15} color={colors.primary} />
+                        <Feather name="arrow-up-right" size={14} color={colors.mutedForeground} />
+                      </View>
+                      <Text style={[styles.recentSearchText, { color: colors.foreground }]} numberOfLines={2}>{recentQuery}</Text>
+                      <Text style={[styles.recentSearchHint, { color: colors.mutedForeground }]}>Search again</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
               </View>
-            </>
-          ) : (
-            <Text style={[styles.empty, { color: colors.mutedForeground }]}>Search for a novel to add it to your shelf.</Text>
-          )
+            ) : null}
+            {recentSearches.length === 0 && books.length > 0 ? (
+              <>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>From your library</Text>
+                <View style={styles.coverGrid}>
+                  {books.map((book) => (
+                    <Pressable key={book.id} onPress={() => { setActiveBook(book.id); router.push('/chapters'); }} style={({ pressed }) => [styles.discoverBook, { opacity: pressed ? 0.7 : 1 }]}>
+                      <BookCover source={book.cover} width={112} height={164} favorite={book.favorite} />
+                      <Text style={[styles.bookTitle, { color: colors.foreground }]} numberOfLines={2}>{book.title}</Text>
+                      <Text style={[styles.bookGenre, { color: colors.mutedForeground }]}>{book.genre}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            ) : recentSearches.length === 0 ? (
+              <Text style={[styles.empty, { color: colors.mutedForeground }]}>Search for a novel to add it to your shelf.</Text>
+            ) : null}
+          </>
         )}
       </ScrollView>
     </View>
@@ -127,6 +175,14 @@ const styles = StyleSheet.create({
   resultAuthor: { fontFamily: 'Inter_400Regular', fontSize: 11 },
   resultSource: { fontFamily: 'Inter_600SemiBold', fontSize: 10 },
   empty: { fontFamily: 'Georgia', fontSize: 17, textAlign: 'center', marginTop: 60, paddingHorizontal: 30 },
+  recentSection: { marginTop: 22 },
+  sectionHeaderRow: { paddingHorizontal: 22, flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  sectionTitleInset: { paddingHorizontal: 0, marginTop: 0 },
+  recentSearchContent: { paddingHorizontal: 22, paddingTop: 14, gap: 10 },
+  recentSearchCard: { minHeight: 112, borderWidth: 1, borderRadius: 14, padding: 12, justifyContent: 'space-between' },
+  recentSearchIconRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  recentSearchText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, lineHeight: 16, marginTop: 8 },
+  recentSearchHint: { fontFamily: 'Inter_400Regular', fontSize: 9, marginTop: 8 },
   coverGrid: { paddingHorizontal: 22, paddingTop: 22, flexDirection: 'row', flexWrap: 'wrap', gap: 20 },
   discoverBook: { width: 112 },
   bookTitle: { fontFamily: 'Inter_500Medium', fontSize: 12, lineHeight: 16, marginTop: 8 },

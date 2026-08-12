@@ -35,7 +35,7 @@ export function ShelfListRow({ book, index, onPress, onToggleFavorite }: { book:
                 onToggleFavorite();
               }}
             >
-              <Feather name="heart" size={16} color={book.favorite ? colors.primary : colors.mutedForeground} />
+              <Feather name="heart" size={16} color={book.favorite ? colors.destructive : colors.mutedForeground} />
             </Pressable>
           </View>
           <Text style={[styles.author, { color: colors.mutedForeground }]}>{book.author}</Text>

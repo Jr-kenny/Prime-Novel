@@ -29,7 +29,7 @@ export default function UpdateSettingsScreen() {
   const insets = useSafeAreaInsets();
   const { settings, setSetting } = useApp();
   const frequencies: Array<{ label: string; value: UpdateFrequency }> = [
-    { label: 'Manual', value: 'manual' },
+    { label: 'Off', value: 'off' },
     { label: 'Hourly', value: 'hourly' },
     { label: 'Daily', value: 'daily' },
   ];
@@ -45,6 +45,7 @@ export default function UpdateSettingsScreen() {
             <Choice key={frequency.value} label={frequency.label} selected={settings.updateFrequency === frequency.value} onPress={() => setSetting('updateFrequency', frequency.value)} />
           ))}
         </View>
+        <Text style={[styles.helper, { color: colors.mutedForeground }]}>Off disables automatic update checks.</Text>
         <View style={styles.spacer} />
         <ToggleRow label="Only update ongoing novels" value={settings.onlyUpdateOngoing} onChange={(value) => setSetting('onlyUpdateOngoing', value)} />
         <ToggleRow label="Download new chapters on update" value={settings.downloadOnUpdate} onChange={(value) => setSetting('downloadOnUpdate', value)} />
@@ -60,6 +61,7 @@ const styles = StyleSheet.create({
   choiceRow: { flexDirection: 'row', gap: 8 },
   choice: { minHeight: 36, paddingHorizontal: 15, borderWidth: StyleSheet.hairlineWidth, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   choiceText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
+  helper: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16, marginTop: 10 },
   spacer: { height: 20 },
   row: { minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottomWidth: StyleSheet.hairlineWidth },
 });

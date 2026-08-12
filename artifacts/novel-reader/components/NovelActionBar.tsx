@@ -41,11 +41,18 @@ export function NovelActionBar({
         accessibilityLabel={favorite ? 'Remove novel favorite' : 'Favorite novel'}
         accessibilityRole="button"
         onPress={onFavoritePress}
-        style={({ pressed }) => [styles.action, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}
+        style={({ pressed }) => [
+          styles.action,
+          {
+            backgroundColor: favorite ? `${colors.destructive}18` : colors.card,
+            borderColor: favorite ? colors.destructive : colors.border,
+            opacity: pressed ? 0.72 : 1,
+          },
+        ]}
         testID="novel-favorite-action"
       >
-        <Feather fill={favorite ? colors.primary : 'transparent'} name="heart" size={15} color={favorite ? colors.primary : colors.mutedForeground} />
-        <Text style={[styles.label, { color: colors.foreground }]}>{favorite ? 'Favorited' : 'Favorite'}</Text>
+        <Feather fill={favorite ? colors.destructive : 'transparent'} name="heart" size={15} color={favorite ? colors.destructive : colors.mutedForeground} />
+        <Text style={[styles.label, { color: favorite ? colors.destructive : colors.foreground }]}>Favorite</Text>
       </Pressable>
       <Pressable
         accessibilityLabel={downloadComplete ? 'All chapters saved offline' : 'Download all chapters'}
