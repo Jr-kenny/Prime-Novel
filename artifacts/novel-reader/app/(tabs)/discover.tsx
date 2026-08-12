@@ -1,9 +1,10 @@
 import { Feather } from '@expo/vector-icons';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
-import { router } from 'expo-router';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BookCover } from '@/components/BookCover';
+import { SearchResultsSkeleton } from '@/components/LoadingSkeleton';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { useColors } from '@/hooks/useColors';
 import { useReader } from '@/context/ReaderContext';
@@ -18,8 +19,14 @@ export default function DiscoverScreen() {
   const { books, setActiveBook } = useReader();
   const { recentSearches, recordRecentSearch } = useApp();
   const { results, searching, search, searchError, clearResults } = useCatalog();
-  const [query, setQuery] = useState('');
+  const { q } = useLocalSearchParams<{ q?: string }>();
+  const routeQuery = Array.isArray(q) ? q[0] : q;
+  const [query, setQuery] = useState(routeQuery ?? '');
   const recentSearchCardWidth = Math.max(76, Math.floor((windowWidth - 44 - 20) / 3));
+
+  useEffect(() => {
+    if (routeQuery && routeQuery !== query) setQuery(routeQuery);
+  }, [query, routeQuery]);
 
   useEffect(() => {
     const trimmedQuery = query.trim();
@@ -77,7 +84,7 @@ export default function DiscoverScreen() {
           />
           {query ? <Pressable accessibilityLabel="Clear search" hitSlop={10} onPress={clearSearch}><Feather name="x" size={16} color={colors.mutedForeground} /></Pressable> : null}
           <Pressable accessibilityLabel="Search" accessibilityRole="button" disabled={query.trim().length < 1 || searching} hitSlop={10} onPress={submitSearch}>
-            {searching ? <ActivityIndicator size="small" color={colors.primary} /> : <Feather name="arrow-right" size={17} color={query.trim().length >= 1 ? colors.primary : colors.mutedForeground} />}
+            <Feather name="arrow-right" size={17} color={query.trim().length >= 1 ? colors.primary : colors.mutedForeground} />
           </Pressable>
         </View>
         {query.trim().length >= 1 ? (
@@ -86,22 +93,24 @@ export default function DiscoverScreen() {
               <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Results</Text>
             </View>
             {searchError ? <Text style={[styles.sectionCopy, { color: colors.mutedForeground }]}>{searchError}</Text> : null}
-            <View style={styles.resultsList}>
-              {results.map((novel) => {
-                return (
-                  <Pressable key={novel.id} onPress={() => openNovel(novel)} style={({ pressed }) => [styles.resultRow, { borderBottomColor: colors.border, opacity: pressed ? 0.72 : 1 }]}>
-                    <BookCover source={novel.coverUrl || require('@/assets/images/cover-lighthouse.jpg')} width={58} height={82} />
-                    <View style={styles.resultCopy}>
-                      <Text style={[styles.resultTitle, { color: colors.foreground }]} numberOfLines={2}>{novel.title}</Text>
-                      {novel.author ? <Text style={[styles.resultAuthor, { color: colors.mutedForeground }]} numberOfLines={1}>{novel.author}</Text> : null}
-                      <Text style={[styles.resultSource, { color: colors.primary }]}>{novel.genres?.[0] ?? 'Story'}</Text>
-                    </View>
-                    <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
-                  </Pressable>
-                );
-              })}
-            </View>
-            {!searching && results.length === 0 && !searchError ? <Text style={[styles.empty, { color: colors.mutedForeground }]}>No novels found.</Text> : null}
+            {searching ? <SearchResultsSkeleton /> : (
+              <View style={styles.resultsList}>
+                {results.map((novel) => {
+                  return (
+                    <Pressable key={novel.id} onPress={() => openNovel(novel)} style={({ pressed }) => [styles.resultRow, { borderBottomColor: colors.border, opacity: pressed ? 0.72 : 1 }]}>
+                      <BookCover source={novel.coverUrl || require('@/assets/images/cover-lighthouse.jpg')} width={58} height={82} />
+                      <View style={styles.resultCopy}>
+                        <Text style={[styles.resultTitle, { color: colors.foreground }]} numberOfLines={2}>{novel.title}</Text>
+                        {novel.author ? <Text style={[styles.resultAuthor, { color: colors.mutedForeground }]} numberOfLines={1}>{novel.author}</Text> : null}
+                        <Text style={[styles.resultSource, { color: colors.primary }]}>{novel.genres?.[0] ?? 'Story'}</Text>
+                      </View>
+                      <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+                    </Pressable>
+                  );
+                })}
+                {!searching && results.length === 0 && !searchError ? <Text style={[styles.empty, { color: colors.mutedForeground }]}>No novels found.</Text> : null}
+              </View>
+            )}
           </>
         ) : (
           <>

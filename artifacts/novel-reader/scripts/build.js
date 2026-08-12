@@ -440,6 +440,29 @@ async function downloadAssets(assets, timestamp) {
   return successCount;
 }
 
+function copyLandingAssets() {
+  const sourceDir = path.join(projectRoot, 'assets', 'images');
+  const targetDir = path.join(projectRoot, 'static-build', 'landing-assets');
+  const assets = [
+    'icon.png',
+    'cover-lighthouse.jpg',
+    'cover-observatory.jpg',
+    'cover-greenhouse.jpg',
+  ];
+
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  for (const asset of assets) {
+    const source = path.join(sourceDir, asset);
+    if (!fs.existsSync(source)) {
+      throw new Error(`Landing asset not found: ${source}`);
+    }
+    fs.copyFileSync(source, path.join(targetDir, asset));
+  }
+
+  console.log(`Copied ${assets.length} landing assets`);
+}
+
 function updateBundleUrls(timestamp, baseUrl) {
   const updateForPlatform = (platform) => {
     const bundlePath = path.join(
@@ -571,6 +594,7 @@ async function main() {
 
   console.log('Updating manifests and creating landing page...');
   updateManifests(manifests, timestamp, baseUrl, assetsByHash);
+  copyLandingAssets();
 
   console.log('Build complete! Deploy to:', baseUrl);
 

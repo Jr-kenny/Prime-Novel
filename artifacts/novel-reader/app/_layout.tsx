@@ -6,19 +6,29 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import {
   Inter_400Regular,
+} from '@expo-google-fonts/inter/400Regular';
+import {
   Inter_500Medium,
+} from '@expo-google-fonts/inter/500Medium';
+import {
   Inter_600SemiBold,
+} from '@expo-google-fonts/inter/600SemiBold';
+import {
   Inter_700Bold,
-  useFonts,
-} from '@expo-google-fonts/inter';
+} from '@expo-google-fonts/inter/700Bold';
+import { useFonts } from 'expo-font';
 import {
   AtkinsonHyperlegible_400Regular,
+} from '@expo-google-fonts/atkinson-hyperlegible/400Regular';
+import {
   AtkinsonHyperlegible_700Bold,
-} from '@expo-google-fonts/atkinson-hyperlegible';
+} from '@expo-google-fonts/atkinson-hyperlegible/700Bold';
 import {
   Merriweather_400Regular,
+} from '@expo-google-fonts/merriweather/400Regular';
+import {
   Merriweather_700Bold,
-} from '@expo-google-fonts/merriweather';
+} from '@expo-google-fonts/merriweather/700Bold';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -47,6 +57,7 @@ function RootLayoutNav() {
         <Stack.Screen name="downloads" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="history" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="categories" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="rankings" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="analytics" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="reader-settings" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="view-settings" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />

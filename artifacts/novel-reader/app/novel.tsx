@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BookCover } from '@/components/BookCover';
+import { NovelDetailsSkeleton } from '@/components/LoadingSkeleton';
 import { NovelActionBar } from '@/components/NovelActionBar';
 import { useCatalog } from '@/context/CatalogContext';
 import type { Book } from '@/context/ReaderContext';
@@ -149,7 +150,7 @@ export default function NovelScreen() {
       </View>
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color={colors.primary} /></View>
+        <NovelDetailsSkeleton />
       ) : error ? (
         <View style={styles.center}>
           <Feather name="wifi-off" size={24} color={colors.mutedForeground} />

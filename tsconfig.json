@@ -1,5 +1,8 @@
 {
   "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2022", "dom"]
+  },
   "compileOnSave": false,
   "files": [],
   "references": [

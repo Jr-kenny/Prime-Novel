@@ -1,7 +1,7 @@
 import { parseDocument, DomUtils } from 'htmlparser2';
 import { selectAll, selectOne as selectOneRaw } from 'css-select';
 import type { AnyNode, Element } from 'domhandler';
-import type { PrimeSourceAdapterId, PrimeSourceDefinition } from '@/data/prime-sources';
+import type { PrimeSourceAdapterId, PrimeSourceDefinition } from '../data/prime-sources';
 
 export type PrimeNovel = {
   id: string;
@@ -116,7 +116,7 @@ function nodeAttribute(node: Element | null | undefined, name: string) {
 function imageUrl(node: Element | null | undefined, baseUrl: string) {
   if (!node) return undefined;
   const srcSet = nodeAttribute(node, 'srcset') ?? nodeAttribute(node, 'data-srcset');
-  const largestSrc = srcSet?.split(',').map((part) => part.trim().split(/\s+/)[0]).filter(Boolean).pop();
+  const largestSrc = srcSet?.split(',').map((part: string) => part.trim().split(/\s+/)[0]).filter(Boolean).pop();
   return absoluteUrl(
     largestSrc ?? nodeAttribute(node, 'data-lazy-src') ?? nodeAttribute(node, 'data-src') ?? nodeAttribute(node, 'data-cfsrc') ?? nodeAttribute(node, 'src'),
     baseUrl,
@@ -139,7 +139,7 @@ function cleanParagraphs(root: AnyNode, selectors: string[]) {
 
   return nodeText(container)
     .split(/\n+/)
-    .map((paragraph) => normalizeText(paragraph))
+    .map((paragraph: string) => normalizeText(paragraph))
     .filter(Boolean);
 }
 
@@ -413,7 +413,7 @@ function forumPostParagraphs(root: AnyNode, postSelector: string) {
     .replace(/<[^>]+>/g, ' ');
   return DomUtils.textContent(parseDocument(html))
     .split(/\n+/)
-    .map((paragraph) => normalizeText(paragraph))
+    .map((paragraph: string) => normalizeText(paragraph))
     .filter(Boolean);
 }
 

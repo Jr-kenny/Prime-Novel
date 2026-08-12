@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import { PRIME_SOURCE_REGISTRY, getPrimeSource } from '@/data/prime-sources';
 import { useApp } from '@/context/AppContext';
 import {
@@ -13,6 +14,7 @@ import {
   type PrimeNovelDetails,
   type PrimeSourceSearchResult,
 } from '@/utils/prime-source-adapters';
+import { loadPrimeChapterOnWeb, loadPrimeNovelOnWeb, searchPrimeSourcesOnWeb } from '@/utils/catalog-web-api';
 
 export type DownloadedChapter = {
   key: string;
@@ -131,7 +133,9 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     setSearching(true);
     setSearchError(undefined);
     try {
-      const nextSourceResults = await searchPrimeSources(enabledSources, trimmedQuery);
+      const nextSourceResults = Platform.OS === 'web'
+        ? await searchPrimeSourcesOnWeb(trimmedQuery, enabledSources.map((source) => source.id))
+        : await searchPrimeSources(enabledSources, trimmedQuery);
       if (requestId !== searchRequestRef.current) return;
       setSourceResults(nextSourceResults);
       setResults(rankSearchResults(flattenSearchResults(nextSourceResults), trimmedQuery));
@@ -146,7 +150,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   const getNovel = useCallback(async (novel: PrimeNovel) => {
     const source = getPrimeSource(novel.sourceId);
     if (!source) throw new Error('This novel source is unavailable.');
-    return loadPrimeNovel(source, novel);
+    return Platform.OS === 'web' ? loadPrimeNovelOnWeb(novel) : loadPrimeNovel(source, novel);
   }, []);
 
   const getChapter = useCallback(async (chapter: PrimeChapter, sourceId: string) => {
@@ -156,7 +160,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     if (cached) return cached.content;
     const source = getPrimeSource(sourceId);
     if (!source) throw new Error('This chapter source is unavailable.');
-    return loadPrimeChapter(source, chapter);
+    return Platform.OS === 'web' ? loadPrimeChapterOnWeb(chapter, sourceId) : loadPrimeChapter(source, chapter);
   }, []);
 
   const downloadChapter = useCallback(async (novel: PrimeNovel, chapter: PrimeChapter) => {
