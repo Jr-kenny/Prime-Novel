@@ -22,6 +22,20 @@ function isValidEmail(value: string) {
   return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function platformDetails() {
+  if (Platform.OS !== 'android') return `${Platform.OS} ${String(Platform.Version)}`;
+  const apiLevel = Number(Platform.Version);
+  if (!Number.isFinite(apiLevel)) return `Android ${String(Platform.Version)}`;
+  const androidVersion = apiLevel === 32
+    ? '12L'
+    : apiLevel >= 33
+      ? String(apiLevel - 20)
+      : apiLevel >= 29
+        ? String(apiLevel - 19)
+        : String(apiLevel);
+  return `Android ${androidVersion} (API ${apiLevel})`;
+}
+
 export default function FeedbackScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -30,7 +44,7 @@ export default function FeedbackScreen() {
   const [replyEmail, setReplyEmail] = useState('');
   const [error, setError] = useState<string>();
   const [status, setStatus] = useState<string>();
-  const appDetails = useMemo(() => `Prime Novel ${Constants.expoConfig?.version ?? '1.0.0'} · ${Platform.OS} ${String(Platform.Version)}`, []);
+  const appDetails = useMemo(() => `Prime Novel ${Constants.expoConfig?.version ?? '1.0.0'} · ${platformDetails()}`, []);
 
   const sendFeedback = async () => {
     const trimmedMessage = message.trim();
