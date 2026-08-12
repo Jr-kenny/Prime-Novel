@@ -52,6 +52,7 @@ function RootLayoutNav() {
         <Stack.Screen name="view-settings" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="update-settings" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="advanced" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="feedback" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="share-link" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
       </Stack>
     </>

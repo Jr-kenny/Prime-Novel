@@ -23,6 +23,7 @@ export default function MoreScreen() {
           <UtilityRow compact icon="grid" onPress={() => router.push('/view-settings')} showChevron={false} testID="more-view" title="View" />
           <UtilityRow compact icon="refresh-cw" onPress={() => router.push('/update-settings')} showChevron={false} testID="more-updates" title="Updates" />
           <UtilityRow compact icon="tool" onPress={() => router.push('/advanced')} showChevron={false} testID="more-advanced" title="Advanced" />
+          <UtilityRow compact description="Tell us what to improve" icon="message-circle" onPress={() => router.push('/feedback')} showChevron={false} testID="more-feedback" title="Feedback & help" />
           <AndroidMoreAction />
         </View>
       </ScrollView>
