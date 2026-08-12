@@ -22,18 +22,59 @@ function isValidEmail(value: string) {
   return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function firstText(values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+}
+
+function androidSystemName() {
+  const runtimeConstants = Platform.constants as Record<string, unknown>;
+  const runtimeValues = [
+    runtimeConstants.Fingerprint,
+    runtimeConstants.Brand,
+    runtimeConstants.Manufacturer,
+    runtimeConstants.Model,
+  ].filter(Boolean).join(' ');
+  const knownSystems: Array<[RegExp, string]> = [
+    [/hyperos/i, 'HyperOS'],
+    [/miui/i, 'MIUI'],
+    [/one ui/i, 'One UI'],
+    [/harmonyos/i, 'HarmonyOS'],
+    [/coloros/i, 'ColorOS'],
+    [/oxygenos/i, 'OxygenOS'],
+    [/funtouch/i, 'Funtouch OS'],
+    [/originos/i, 'OriginOS'],
+    [/hios/i, 'HiOS'],
+    [/realme ui/i, 'realme UI'],
+    [/magicos/i, 'MagicOS'],
+    [/my ux/i, 'My UX'],
+    [/flyme/i, 'Flyme'],
+  ];
+  return knownSystems.find(([pattern]) => pattern.test(runtimeValues))?.[1];
+}
+
 function platformDetails() {
-  if (Platform.OS !== 'android') return `${Platform.OS} ${String(Platform.Version)}`;
-  const apiLevel = Number(Platform.Version);
-  if (!Number.isFinite(apiLevel)) return `Android ${String(Platform.Version)}`;
-  const androidVersion = apiLevel === 32
-    ? '12L'
-    : apiLevel >= 33
-      ? String(apiLevel - 20)
-      : apiLevel >= 29
-        ? String(apiLevel - 19)
-        : String(apiLevel);
-  return `Android ${androidVersion} (API ${apiLevel})`;
+  if (Platform.OS === 'android') {
+    const androidVersion = firstText([
+      Platform.constants.Release,
+      Constants.systemVersion,
+    ]) ?? 'unknown';
+    const manufacturer = firstText([Platform.constants.Manufacturer]);
+    const model = firstText([Platform.constants.Model, Constants.deviceName]);
+    const device = model && manufacturer && !model.toLocaleLowerCase().includes(manufacturer.toLocaleLowerCase())
+      ? `${manufacturer} ${model}`
+      : model || manufacturer;
+    return [`Android version ${androidVersion}`, androidSystemName(), device].filter(Boolean).join(' · ');
+  }
+  if (Platform.OS === 'ios') {
+    const iosVersion = firstText([Platform.constants.osVersion, Constants.systemVersion, Platform.Version]) ?? 'unknown';
+    const iosSystem = firstText([Platform.constants.systemName]) ?? 'iOS';
+    const iosModel = firstText([Constants.model, Constants.deviceName]);
+    return [`${iosSystem} version ${iosVersion}`, iosModel].filter(Boolean).join(' · ');
+  }
+  return `${Platform.OS} version ${String(Platform.Version)}`;
 }
 
 export default function FeedbackScreen() {
