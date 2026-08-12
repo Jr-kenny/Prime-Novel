@@ -17,6 +17,8 @@ The project uses one shared Expo and React Native codebase for the mobile applic
 
 Prime Novel keeps catalogue and source implementation details inside the app. Users should be able to read without becoming repository managers or learning how the catalogue is assembled. Platform-specific source capabilities remain behind native boundaries so the same product can support iOS and Android responsibly.
 
+The website is the same shared Expo and React Native experience compiled for the browser. It is deployed from this repository through Vercel, while the native builds remain the primary mobile distribution targets.
+
 ## Project structure
 
 The mobile application is located at:
@@ -48,12 +50,22 @@ cd artifacts/novel-reader
 pnpm exec expo start
 ```
 
+Run the shared app in a browser:
+
+```bash
+cd artifacts/novel-reader
+pnpm exec expo start --web
+```
+
 Useful checks:
 
 ```bash
 pnpm run typecheck
+pnpm --filter @workspace/novel-reader exec expo export --platform web
 pnpm exec expo export --platform android
 pnpm exec expo export --platform ios
 ```
 
-The app is being developed for mobile first. Web preview is useful for quick inspection, but it is not the target product platform.
+The production web build is configured in [`vercel.json`](vercel.json). It exports `artifacts/novel-reader/dist` and uses the same app routes and state as the native application.
+
+The app is being developed for mobile first. The website is the shared browser build, not a separate product implementation.

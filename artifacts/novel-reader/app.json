@@ -19,6 +19,7 @@
     },
     "android": {},
     "web": {
+      "output": "single",
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
