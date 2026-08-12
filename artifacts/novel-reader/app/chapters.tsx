@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BookCover } from '@/components/BookCover';
 import { NovelActionBar } from '@/components/NovelActionBar';
+import { WebLandingButton } from '@/components/WebLandingButton';
 import { useCatalog } from '@/context/CatalogContext';
 import { useColors } from '@/hooks/useColors';
 import { useReader } from '@/context/ReaderContext';
@@ -121,7 +122,9 @@ export default function ChaptersScreen() {
             <Feather name="chevron-left" size={23} color={colors.foreground} />
           </Pressable>
           <Text style={[styles.title, { color: colors.foreground }]}>Chapters</Text>
-          <View style={styles.headerSpacer} />
+          <View style={styles.headerSpacer}>
+            <WebLandingButton color={colors.foreground} />
+          </View>
         </View>
         <View style={styles.emptyState}>
           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Choose a novel first.</Text>
@@ -248,7 +251,9 @@ export default function ChaptersScreen() {
           <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>NOVEL</Text>
           <Text style={[styles.title, { color: colors.foreground }]} numberOfLines={1}>{activeBook.title}</Text>
         </View>
-        <View style={styles.headerSpacer} />
+        <View style={styles.headerSpacer}>
+          <WebLandingButton color={colors.foreground} />
+        </View>
       </View>
 
       <FlatList

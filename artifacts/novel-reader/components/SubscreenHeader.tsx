@@ -2,6 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { WebLandingButton } from '@/components/WebLandingButton';
 import { useColors } from '@/hooks/useColors';
 import type { ReaderPalette } from '@/utils/reader-style';
 
@@ -28,7 +29,9 @@ export function SubscreenHeader({ eyebrow, title, palette }: { eyebrow?: string;
         {eyebrow ? <Text style={[styles.eyebrow, { color: accent }]}>{eyebrow.toUpperCase()}</Text> : null}
         <Text style={[styles.title, { color: foreground }]}>{title}</Text>
       </View>
-      <View style={styles.balance} />
+      <View style={styles.balance}>
+        <WebLandingButton color={foreground} />
+      </View>
     </View>
   );
 }

@@ -5,6 +5,13 @@
   "installCommand": "pnpm install --frozen-lockfile",
   "cleanUrls": true,
   "framework": null,
+  "redirects": [
+    {
+      "source": "/downloads/prime-novel-android.apk",
+      "destination": "https://expo.dev/artifacts/eas/Kndpei4ouptLmr1VcN2eLPyYFDh6uesjXVtKyPw8ySA.apk",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/app/_expo/:path*",

@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BookCover } from '@/components/BookCover';
 import { NovelDetailsSkeleton } from '@/components/LoadingSkeleton';
 import { NovelActionBar } from '@/components/NovelActionBar';
+import { WebLandingButton } from '@/components/WebLandingButton';
 import { useCatalog } from '@/context/CatalogContext';
 import type { Book } from '@/context/ReaderContext';
 import { useReader } from '@/context/ReaderContext';
@@ -146,7 +147,9 @@ export default function NovelScreen() {
           <Feather name="chevron-left" size={23} color={colors.foreground} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.foreground }]} numberOfLines={1}>{title ?? 'Novel'}</Text>
-        <View style={styles.headerBalance} />
+        <View style={styles.headerBalance}>
+          <WebLandingButton color={colors.foreground} />
+        </View>
       </View>
 
       {loading ? (
