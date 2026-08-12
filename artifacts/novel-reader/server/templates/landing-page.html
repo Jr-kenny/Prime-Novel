@@ -1920,7 +1920,7 @@
         <span class="download-icon" aria-hidden="true">▶</span>
         <span><strong>Google Play</strong><small data-download-label="play">Android listing coming soon</small></span>
       </a>
-      <a class="download-option" href="/downloads/prime-novel-android.apk" data-download-link="apk">
+      <a class="download-option" download="Prime-Novel.apk" href="/downloads/prime-novel-android.apk" data-download-link="apk">
         <span class="download-icon" aria-hidden="true">↓</span>
         <span><strong>Direct download (APK)</strong><small data-download-label="apk">Current Android preview build</small></span>
       </a>
@@ -2089,6 +2089,7 @@
             link.setAttribute("aria-disabled", url ? "false" : "true");
             if (url) link.href = url;
             else link.href = "#";
+            if (kind === "apk") link.download = "Prime-Novel.apk";
             link.dataset.platformMatch = (platform === "android" && kind === "apk") || (platform === "ios" && kind === "ios") ? "true" : "false";
           });
           const note = document.querySelector("[data-download-note]");
