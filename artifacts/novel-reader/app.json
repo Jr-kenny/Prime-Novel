@@ -39,6 +39,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "82f8a4c7-4b48-4877-838b-3b54bebf8649"
+      }
+    },
+    "owner": "primeisles"
   }
 }
