@@ -7,14 +7,14 @@ import {
   flattenSearchResults,
   loadPrimeChapter,
   loadPrimeNovel,
-  searchPrimeSources,
+  searchPrimeSourcesIncremental,
   type PrimeChapter,
   type PrimeChapterContent,
   type PrimeNovel,
   type PrimeNovelDetails,
   type PrimeSourceSearchResult,
 } from '@/utils/prime-source-adapters';
-import { loadPrimeChapterOnWeb, loadPrimeNovelOnWeb, searchPrimeSourcesOnWeb } from '@/utils/catalog-web-api';
+import { loadPrimeChapterOnWeb, loadPrimeNovelOnWeb, searchPrimeSourcesOnWebIncremental } from '@/utils/catalog-web-api';
 
 export type DownloadedChapter = {
   key: string;
@@ -115,7 +115,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const enabledSources = useMemo(
-    () => PRIME_SOURCE_REGISTRY.filter((source) => sources.find((record) => record.id === source.id)?.enabled !== false),
+    () => PRIME_SOURCE_REGISTRY.filter((source) => source.active !== false && sources.find((record) => record.id === source.id)?.enabled !== false),
     [sources],
   );
 
@@ -132,10 +132,29 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     }
     setSearching(true);
     setSearchError(undefined);
+    setResults([]);
+    setSourceResults([]);
     try {
-      const nextSourceResults = Platform.OS === 'web'
-        ? await searchPrimeSourcesOnWeb(trimmedQuery, enabledSources.map((source) => source.id))
-        : await searchPrimeSources(enabledSources, trimmedQuery);
+      let nextSourceResults: PrimeSourceSearchResult[];
+      if (Platform.OS === 'web') {
+        const incrementalResults = new Map<string, PrimeSourceSearchResult>();
+        nextSourceResults = await searchPrimeSourcesOnWebIncremental(trimmedQuery, enabledSources, (partialResult) => {
+          if (requestId !== searchRequestRef.current) return;
+          incrementalResults.set(partialResult.source.id, partialResult);
+          const visibleResults = Array.from(incrementalResults.values());
+          setSourceResults(visibleResults);
+          setResults(rankSearchResults(flattenSearchResults(visibleResults), trimmedQuery));
+        });
+      } else {
+        const incrementalResults = new Map<string, PrimeSourceSearchResult>();
+        nextSourceResults = await searchPrimeSourcesIncremental(enabledSources, trimmedQuery, (partialResult) => {
+          if (requestId !== searchRequestRef.current) return;
+          incrementalResults.set(partialResult.source.id, partialResult);
+          const visibleResults = Array.from(incrementalResults.values());
+          setSourceResults(visibleResults);
+          setResults(rankSearchResults(flattenSearchResults(visibleResults), trimmedQuery));
+        });
+      }
       if (requestId !== searchRequestRef.current) return;
       setSourceResults(nextSourceResults);
       setResults(rankSearchResults(flattenSearchResults(nextSourceResults), trimmedQuery));

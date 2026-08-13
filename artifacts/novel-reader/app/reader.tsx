@@ -399,7 +399,7 @@ export default function ReaderScreen() {
     advanceReading,
     setActiveChapter,
     addBookmark,
-    bookmarks,
+    isChapterBookmarked,
     getReadingPosition,
     saveReadingPosition,
     markChapterRead,
@@ -911,8 +911,8 @@ export default function ReaderScreen() {
           <Text style={[styles.topTitle, { color: palette.text }]} numberOfLines={1}>{activeBook.title}</Text>
           <View style={styles.topActions}>
             <WebLandingButton color={palette.text} />
-            <Pressable accessibilityLabel="Add bookmark" accessibilityRole="button" hitSlop={12} onPress={() => addBookmark(activeBook.chapter)} testID="reader-bookmark">
-              <Feather name="bookmark" size={19} color={bookmarks.length > 2 ? palette.accent : palette.text} />
+            <Pressable accessibilityLabel="Add bookmark" accessibilityRole="button" hitSlop={12} onPress={() => addBookmark(activeBook.chapter, activeBook.id)} testID="reader-bookmark">
+              <Feather name="bookmark" size={19} color={isChapterBookmarked(activeBook.chapter, activeBook.id) ? palette.accent : palette.text} />
             </Pressable>
           </View>
       </Animated.View>

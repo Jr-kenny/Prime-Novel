@@ -28,6 +28,30 @@ export function searchPrimeSourcesOnWeb(query: string, sourceIds?: string[]) {
   return requestCatalog<PrimeSourceSearchResult[]>(params);
 }
 
+export async function searchPrimeSourcesOnWebIncremental(
+  query: string,
+  sources: Array<PrimeSourceSearchResult['source']>,
+  onResult: (result: PrimeSourceSearchResult) => void,
+) {
+  const results = await Promise.all(sources.map(async (source) => {
+    try {
+      const sourceResults = await searchPrimeSourcesOnWeb(query, [source.id]);
+      const result = sourceResults[0] ?? { source, novels: [] } satisfies PrimeSourceSearchResult;
+      onResult(result);
+      return result;
+    } catch (error) {
+      const result = {
+        source,
+        novels: [],
+        error: error instanceof Error ? error.message : 'Source could not be reached.',
+      } satisfies PrimeSourceSearchResult;
+      onResult(result);
+      return result;
+    }
+  }));
+  return results;
+}
+
 export function loadPrimeNovelOnWeb(novel: PrimeNovel) {
   return requestCatalog<PrimeNovelDetails>(new URLSearchParams({
     op: 'novel',

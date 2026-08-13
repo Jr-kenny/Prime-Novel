@@ -27,9 +27,9 @@ function requestedSources(request: CatalogRequest) {
     .split(',')
     .map((sourceId) => sourceId.trim())
     .filter(Boolean);
-  if (sourceIds.length === 0) return PRIME_SOURCE_REGISTRY;
+  if (sourceIds.length === 0) return PRIME_SOURCE_REGISTRY.filter((source) => source.active !== false);
   const requested = new Set(sourceIds);
-  return PRIME_SOURCE_REGISTRY.filter((source) => requested.has(source.id));
+  return PRIME_SOURCE_REGISTRY.filter((source) => source.active !== false && requested.has(source.id));
 }
 
 function sendError(response: CatalogResponse, status: number, message: string) {

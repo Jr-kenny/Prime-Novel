@@ -67,13 +67,17 @@ type ReaderContextValue = {
   setActiveChapter: (chapter: number, bookId?: string) => void;
   markChapterRead: (chapter?: number) => void;
   markChapterUnread: (chapter?: number) => void;
+  markChaptersRead: (chapters: number[]) => void;
+  markChaptersUnread: (chapters: number[]) => void;
   isChapterRead: (chapter?: number) => boolean;
   toggleFavorite: (id: string) => void;
   removeBook: (id: string) => void;
   setActiveBook: (id: string) => void;
   upsertBook: (book: Book) => void;
-  bookmarks: number[];
-  addBookmark: (chapter?: number) => void;
+  bookmarks: Record<string, number[]>;
+  addBookmark: (chapter?: number, bookId?: string) => void;
+  removeBookmark: (chapter?: number, bookId?: string) => void;
+  isChapterBookmarked: (chapter?: number, bookId?: string) => boolean;
   getReadingPosition: (bookId?: string, chapter?: number) => ReadingPosition;
   saveReadingPosition: (position: Partial<ReadingPosition>, bookId?: string) => void;
   hydrated: boolean;
@@ -97,7 +101,7 @@ type StorageSnapshot = {
   books: Book[];
   activeId: string;
   preferences: ReaderPreferences;
-  bookmarks: number[];
+  bookmarks: Record<string, number[]>;
   positions: Record<string, ReadingPosition>;
 };
 
@@ -105,9 +109,22 @@ const initialSnapshot: StorageSnapshot = {
   books: [],
   activeId: '',
   preferences: defaultReaderPreferences,
-  bookmarks: [67, 104],
+  bookmarks: {},
   positions: {},
 };
+
+function normalizeBookmarks(value: Record<string, number[]> | number[] | null, activeId: string) {
+  if (Array.isArray(value)) {
+    return activeId && value.length > 0 ? { [activeId]: Array.from(new Set(value.filter((chapter) => Number.isInteger(chapter)))) } : {};
+  }
+  if (!value || typeof value !== 'object') return {};
+  return Object.fromEntries(
+    Object.entries(value).map(([bookId, chapters]) => [
+      bookId,
+      Array.from(new Set((Array.isArray(chapters) ? chapters : []).filter((chapter) => Number.isInteger(chapter)))),
+    ]),
+  );
+}
 
 function readJson<T>(value: string | null, fallback: T): T {
   if (!value) return fallback;
@@ -166,7 +183,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   const [books, setBooks] = useState<Book[]>([]);
   const [activeId, setActiveId] = useState('');
   const [readerPreferences, setReaderPreferences] = useState<ReaderPreferences>(defaultReaderPreferences);
-  const [bookmarks, setBookmarks] = useState<number[]>([67, 104]);
+  const [bookmarks, setBookmarks] = useState<Record<string, number[]>>({});
   const [readingPositions, setReadingPositions] = useState<Record<string, ReadingPosition>>({});
   const [hydrated, setHydrated] = useState(false);
   const snapshotRef = useRef<StorageSnapshot>(initialSnapshot);
@@ -185,7 +202,10 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         const storedActive = entries[1][1] ?? initialSnapshot.activeId;
         const storedTheme = readJson<ReaderTheme | null>(entries[2][1], null);
         const storedPreferences = readJson<Partial<ReaderPreferences> | null>(entries[3][1], null);
-        const storedBookmarks = readJson<number[]>(entries[4][1], initialSnapshot.bookmarks);
+        const storedBookmarks = normalizeBookmarks(
+          readJson<Record<string, number[]> | number[] | null>(entries[4][1], null),
+          storedActive,
+        );
         const storedPositions = readJson<Record<string, ReadingPosition>>(entries[5][1], {});
         const nextPreferences: ReaderPreferences = {
           ...defaultReaderPreferences,
@@ -331,22 +351,25 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     return nextChapter;
   };
 
-  const markChapterRead = (chapter = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId)?.chapter) => {
-    if (!chapter) return;
+  const markChaptersRead = (chapters: number[]) => {
+    const uniqueChapters = Array.from(new Set(chapters.filter((chapter) => Number.isInteger(chapter) && chapter > 0)));
+    if (uniqueChapters.length === 0) return;
     const activeBook = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId);
     if (!activeBook) return;
-    const nextPosition = { ...positionForChapter(activeBook, snapshotRef.current.positions, chapter), chapterProgress: 1 };
     const nextPositions = {
       ...snapshotRef.current.positions,
-      [chapterPositionKey(activeBook.id, chapter)]: nextPosition,
+      ...Object.fromEntries(uniqueChapters.map((chapter) => [
+        chapterPositionKey(activeBook.id, chapter),
+        { ...positionForChapter(activeBook, snapshotRef.current.positions, chapter), chapterProgress: 1 },
+      ])),
     };
     const nextBooks = snapshotRef.current.books.map((book) => {
       if (book.id !== snapshotRef.current.activeId) return book;
       return {
         ...book,
-        progress: Math.max(book.progress, bookProgressForPosition(book, chapter, 1)),
-        readChapters: Array.from(new Set([...(book.readChapters ?? []), chapter])),
-        status: chapter >= book.totalChapters ? ('Completed' as BookStatus) : book.status,
+        progress: Math.max(book.progress, ...uniqueChapters.map((chapter) => bookProgressForPosition(book, chapter, 1))),
+        readChapters: Array.from(new Set([...(book.readChapters ?? []), ...uniqueChapters])).sort((left, right) => left - right),
+        status: uniqueChapters.some((chapter) => chapter >= book.totalChapters) ? ('Completed' as BookStatus) : book.status,
       };
     });
     setBooks(nextBooks);
@@ -354,18 +377,27 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     writeSnapshot({ books: nextBooks, positions: nextPositions });
   };
 
-  const markChapterUnread = (chapter = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId)?.chapter) => {
-    if (!chapter) return;
+  const markChapterRead = (chapter = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId)?.chapter) => {
+    if (chapter) markChaptersRead([chapter]);
+  };
+
+  const markChaptersUnread = (chapters: number[]) => {
+    const uniqueChapters = new Set(chapters.filter((chapter) => Number.isInteger(chapter) && chapter > 0));
+    if (uniqueChapters.size === 0) return;
     const nextBooks = snapshotRef.current.books.map((book) => {
       if (book.id !== snapshotRef.current.activeId) return book;
       return {
         ...book,
-        readChapters: (book.readChapters ?? []).filter((readChapter) => readChapter !== chapter),
+        readChapters: (book.readChapters ?? []).filter((readChapter) => !uniqueChapters.has(readChapter)),
         status: book.status === 'Completed' ? 'Continue' : book.status,
       };
     });
     setBooks(nextBooks);
     writeSnapshot({ books: nextBooks });
+  };
+
+  const markChapterUnread = (chapter = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId)?.chapter) => {
+    if (chapter) markChaptersUnread([chapter]);
   };
 
   const isChapterRead = (chapter = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId)?.chapter) => {
@@ -385,17 +417,47 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     const nextPositions = Object.fromEntries(
       Object.entries(snapshotRef.current.positions).filter(([key]) => key !== id && !key.startsWith(`${id}:`)),
     );
+    const nextBookmarks = Object.fromEntries(Object.entries(snapshotRef.current.bookmarks).filter(([bookId]) => bookId !== id));
     setBooks(nextBooks);
     setActiveId(nextActiveId);
     setReadingPositions(nextPositions);
-    writeSnapshot({ books: nextBooks, activeId: nextActiveId, positions: nextPositions });
+    setBookmarks(nextBookmarks);
+    writeSnapshot({ books: nextBooks, activeId: nextActiveId, positions: nextPositions, bookmarks: nextBookmarks });
   };
 
-  const addBookmark = (chapter = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId)?.chapter ?? 1) => {
-    const nextBookmarks = [...snapshotRef.current.bookmarks, chapter];
+  const addBookmark = (
+    chapter = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId)?.chapter ?? 1,
+    bookId = snapshotRef.current.activeId,
+  ) => {
+    if (!bookId) return;
+    const currentBookmarks = snapshotRef.current.bookmarks[bookId] ?? [];
+    if (currentBookmarks.includes(chapter)) return;
+    const nextBookmarks = {
+      ...snapshotRef.current.bookmarks,
+      [bookId]: [...currentBookmarks, chapter].sort((left, right) => left - right),
+    };
     setBookmarks(nextBookmarks);
     writeSnapshot({ bookmarks: nextBookmarks });
   };
+
+  const removeBookmark = (
+    chapter = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId)?.chapter ?? 1,
+    bookId = snapshotRef.current.activeId,
+  ) => {
+    if (!bookId) return;
+    const currentBookmarks = snapshotRef.current.bookmarks[bookId] ?? [];
+    const nextBookmarks = {
+      ...snapshotRef.current.bookmarks,
+      [bookId]: currentBookmarks.filter((item) => item !== chapter),
+    };
+    setBookmarks(nextBookmarks);
+    writeSnapshot({ bookmarks: nextBookmarks });
+  };
+
+  const isChapterBookmarked = (
+    chapter = snapshotRef.current.books.find((book) => book.id === snapshotRef.current.activeId)?.chapter,
+    bookId = snapshotRef.current.activeId,
+  ) => Boolean(chapter && snapshotRef.current.bookmarks[bookId]?.includes(chapter));
 
   const getReadingPosition = (bookId = snapshotRef.current.activeId, chapter?: number) => {
     const book = snapshotRef.current.books.find((item) => item.id === bookId);
@@ -441,6 +503,8 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         setActiveChapter,
         markChapterRead,
         markChapterUnread,
+        markChaptersRead,
+        markChaptersUnread,
         isChapterRead,
         toggleFavorite,
         removeBook,
@@ -448,6 +512,8 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         upsertBook,
         bookmarks,
         addBookmark,
+        removeBookmark,
+        isChapterBookmarked,
         getReadingPosition,
         saveReadingPosition,
         hydrated,

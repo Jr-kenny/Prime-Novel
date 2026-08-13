@@ -63,29 +63,48 @@ export default function ChaptersScreen() {
     isChapterRead,
     markChapterRead,
     markChapterUnread,
+    markChaptersRead,
+    markChaptersUnread,
+    addBookmark,
+    removeBookmark,
+    getReadingPosition,
     removeBook,
     toggleFavorite,
   } = useReader();
-  const { downloadAllChapters, downloads } = useCatalog();
+  const { downloadAllChapters, downloads, removeDownload } = useCatalog();
   const [chapterFilter, setChapterFilter] = useState<ChapterFilter>('all');
   const [filterOpen, setFilterOpen] = useState(false);
   const [jumpOpen, setJumpOpen] = useState(false);
   const [jumpValue, setJumpValue] = useState('');
   const [bulkDownload, setBulkDownload] = useState<{ completed: number; total: number; failed: number }>();
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedChapters, setSelectedChapters] = useState<number[]>([]);
+  const [selectionAnchor, setSelectionAnchor] = useState<number>();
+  const [selectionBusy, setSelectionBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
 
   const chapters = useMemo(
-    () => Array.from({ length: activeBook?.totalChapters ?? 0 }, (_, index) => index + 1),
-    [activeBook?.totalChapters],
+    () => {
+      if (!activeBook) return [];
+      if (activeBook.chapters?.length) return [...activeBook.chapters].sort((left, right) => left.number - right.number);
+      return Array.from({ length: activeBook.totalChapters }, (_, index) => ({
+        id: `${activeBook.id}:${index + 1}`,
+        number: index + 1,
+        title: `Chapter ${index + 1}`,
+        url: '',
+      }));
+    },
+    [activeBook],
   );
   const visibleChapters = useMemo(
     () => chapters.filter((chapter) => {
-      if (chapterFilter === 'read') return isChapterRead(chapter);
-      if (chapterFilter === 'unread') return !isChapterRead(chapter);
+      if (chapterFilter === 'read') return isChapterRead(chapter.number);
+      if (chapterFilter === 'unread') return !isChapterRead(chapter.number);
       return true;
     }),
     [chapters, chapterFilter, isChapterRead, books],
   );
+  const selectedSet = useMemo(() => new Set(selectedChapters), [selectedChapters]);
 
   const goBack = () => {
     if (router.canGoBack()) {
@@ -98,6 +117,72 @@ export default function ChaptersScreen() {
   const openChapter = (chapter: number) => {
     setActiveChapter(chapter);
     router.push('/reader');
+  };
+
+  const exitSelection = () => {
+    setSelectionMode(false);
+    setSelectedChapters([]);
+    setSelectionAnchor(undefined);
+  };
+
+  const enterSelection = (chapter: number) => {
+    setSelectionMode(true);
+    setSelectionAnchor(chapter);
+    setSelectedChapters([chapter]);
+  };
+
+  const toggleChapterSelection = (chapter: number) => {
+    setSelectionAnchor((anchor) => anchor ?? chapter);
+    setSelectedChapters((current) => {
+      const next = current.includes(chapter) ? current.filter((item) => item !== chapter) : [...current, chapter];
+      if (next.length === 0) setSelectionMode(false);
+      return next;
+    });
+  };
+
+  const selectAllChapters = () => {
+    setSelectionMode(true);
+    setSelectedChapters(chapters.map((chapter) => chapter.number));
+    setSelectionAnchor((anchor) => anchor ?? chapters[0]?.number);
+  };
+
+  const selectFromAnchor = () => {
+    if (selectionAnchor === undefined) return;
+    setSelectionMode(true);
+    setSelectedChapters(chapters.filter((chapter) => chapter.number >= selectionAnchor).map((chapter) => chapter.number));
+  };
+
+  const selectedChapterRecords = chapters.filter((chapter) => selectedSet.has(chapter.number));
+
+  const updateSelectedReadState = (read: boolean) => {
+    if (read) markChaptersRead(selectedChapters);
+    else markChaptersUnread(selectedChapters);
+    setNotice(read ? `${selectedChapters.length} chapters marked as read.` : `${selectedChapters.length} chapters marked as unread.`);
+  };
+
+  const updateSelectedBookmarks = (add: boolean) => {
+    selectedChapters.forEach((chapter) => {
+      if (add) addBookmark(chapter, activeBook?.id);
+      else removeBookmark(chapter, activeBook?.id);
+    });
+    setNotice(add ? `${selectedChapters.length} chapters bookmarked.` : `${selectedChapters.length} bookmarks removed.`);
+  };
+
+  const downloadSelectedChapters = async () => {
+    if (!catalogNovel || selectedChapterRecords.length === 0 || selectionBusy) return;
+    setSelectionBusy(true);
+    setNotice(undefined);
+    const result = await downloadAllChapters(catalogNovel, selectedChapterRecords);
+    setSelectionBusy(false);
+    setNotice(result.failed > 0 ? `${result.downloaded} chapters saved. ${result.failed} could not be downloaded.` : `${result.downloaded} chapters saved for offline reading.`);
+  };
+
+  const deleteSelectedDownloads = () => {
+    const sourceId = activeBook?.sourceId;
+    if (!sourceId) return;
+    const downloadable = selectedChapterRecords.filter((chapter) => downloads.some((download) => download.key === `${sourceId}:${chapter.id}`));
+    downloadable.forEach((chapter) => removeDownload(`${sourceId}:${chapter.id}`));
+    setNotice(downloadable.length > 0 ? `${downloadable.length} downloaded chapters removed.` : 'No downloaded chapters were selected.');
   };
 
   const resumeReading = () => {
@@ -248,55 +333,107 @@ export default function ChaptersScreen() {
           <Feather name="chevron-left" size={23} color={colors.foreground} />
         </Pressable>
         <View style={styles.headerCopy}>
-          <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>NOVEL</Text>
-          <Text style={[styles.title, { color: colors.foreground }]} numberOfLines={1}>{activeBook.title}</Text>
+          {selectionMode ? (
+            <>
+              <Text style={[styles.eyebrow, { color: colors.primary }]}>SELECTION</Text>
+              <Text style={[styles.title, { color: colors.foreground }]} numberOfLines={1}>{selectedChapters.length} selected</Text>
+            </>
+          ) : (
+            <>
+              <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>NOVEL</Text>
+              <Text style={[styles.title, { color: colors.foreground }]} numberOfLines={1}>{activeBook.title}</Text>
+            </>
+          )}
         </View>
-        <View style={styles.headerSpacer}>
-          <WebLandingButton color={colors.foreground} />
-        </View>
+        {selectionMode ? (
+          <View style={styles.selectionHeaderActions}>
+            <Pressable accessibilityLabel="Select all chapters" accessibilityRole="button" hitSlop={10} onPress={selectAllChapters}>
+              <Feather name="check-square" size={20} color={colors.foreground} />
+            </Pressable>
+            <Pressable accessibilityLabel="Exit chapter selection" accessibilityRole="button" hitSlop={10} onPress={exitSelection}>
+              <Feather name="x" size={22} color={colors.foreground} />
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.headerSpacer}>
+            <WebLandingButton color={colors.foreground} />
+          </View>
+        )}
       </View>
 
       <FlatList
-        contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + (selectionMode ? 98 : 32) }}
         data={visibleChapters}
-        extraData={books}
-        keyExtractor={(chapter) => `${activeBook.id}-${chapter}`}
+        extraData={{ books, downloads, selectedChapters, selectionMode }}
+        keyExtractor={(chapter) => `${activeBook.id}-${chapter.number}`}
         ListEmptyComponent={(
           <View style={styles.emptyState}>
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Nothing here yet</Text>
             <Text style={[styles.emptyCopy, { color: colors.mutedForeground }]}>Try a different chapter filter.</Text>
           </View>
         )}
-        ListHeaderComponent={listHeader}
-        renderItem={({ item: chapter }) => {
+        ListHeaderComponent={selectionMode ? (
+          <View style={[styles.selectionSummary, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.selectionSummaryText, { color: colors.mutedForeground }]}>{selectedChapters.length} chapter{selectedChapters.length === 1 ? '' : 's'} selected</Text>
+            {selectionAnchor !== undefined ? (
+              <Pressable accessibilityRole="button" onPress={selectFromAnchor} style={({ pressed }) => [styles.selectFromAction, { borderColor: colors.border, opacity: pressed ? 0.68 : 1 }]}>
+                <Feather name="chevrons-up" size={14} color={colors.foreground} />
+                <Text style={[styles.selectFromActionText, { color: colors.foreground }]}>Select from {selectionAnchor} up</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : listHeader}
+        renderItem={({ item }) => {
+          const chapter = item.number;
           const read = isChapterRead(chapter);
           const current = chapter === activeBook.chapter;
+          const selected = selectedSet.has(chapter);
+          const downloaded = downloads.some((download) => download.key === `${activeBook.sourceId}:${item.id}`);
+          const position = current ? getReadingPosition(activeBook.id, chapter) : undefined;
+          const positionPercent = position ? Math.round(position.chapterProgress * 1000) / 10 : 0;
           return (
             <Pressable
               accessibilityRole="button"
-              onPress={() => openChapter(chapter)}
-              style={({ pressed }) => [styles.chapterRow, { borderBottomColor: colors.border, opacity: pressed ? 0.7 : 1 }]}
+              accessibilityState={{ selected }}
+              onLongPress={() => enterSelection(chapter)}
+              onPress={() => (selectionMode ? toggleChapterSelection(chapter) : openChapter(chapter))}
+              delayLongPress={260}
+              style={({ pressed }) => [
+                styles.chapterRow,
+                selectionMode && styles.selectionChapterRow,
+                {
+                  backgroundColor: selected ? colors.accent : colors.background,
+                  borderBottomColor: colors.border,
+                  opacity: pressed ? 0.7 : selected || current || !read ? 1 : 0.46,
+                },
+              ]}
             >
               <View style={[styles.chapterNumber, { backgroundColor: current ? colors.primary : colors.secondary }]}>
                 <Text style={[styles.chapterNumberText, { color: current ? colors.primaryForeground : colors.secondaryForeground }]}>{chapter}</Text>
               </View>
               <View style={styles.chapterCopy}>
-                <Text style={[styles.chapterTitle, { color: colors.foreground }]}>Chapter {chapter}</Text>
-                <Text style={[styles.chapterStatus, { color: current ? colors.primary : colors.mutedForeground }]}>{current ? 'Currently reading' : read ? 'Read' : 'Unread'}</Text>
+                <Text style={[styles.chapterTitle, { color: colors.foreground }]} numberOfLines={2}>{item.title || `Chapter ${chapter}`}</Text>
+                <Text style={[styles.chapterStatus, { color: current ? colors.primary : colors.mutedForeground }]}>{current ? `Position: ${positionPercent}%` : downloaded ? 'Downloaded' : read ? 'Read' : 'Unread'}</Text>
               </View>
-              <Pressable
-                accessibilityLabel={read ? `Mark chapter ${chapter} unread` : `Mark chapter ${chapter} read`}
-                accessibilityRole="button"
-                hitSlop={10}
-                onPress={(event) => {
-                  event.stopPropagation();
-                  if (read) markChapterUnread(chapter);
-                  else markChapterRead(chapter);
-                }}
-              >
-                <Feather name={read ? 'check-circle' : 'circle'} size={18} color={read ? colors.primary : colors.mutedForeground} />
-              </Pressable>
-              <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+              {selectionMode ? (
+                <Feather name={selected ? 'check-square' : 'square'} size={20} color={selected ? colors.primary : colors.mutedForeground} />
+              ) : (
+                <>
+                  <Pressable
+                    accessibilityLabel={read ? `Mark chapter ${chapter} unread` : `Mark chapter ${chapter} read`}
+                    accessibilityRole="button"
+                    hitSlop={10}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      if (read) markChapterUnread(chapter);
+                      else markChapterRead(chapter);
+                    }}
+                  >
+                    <Feather name={read ? 'check-circle' : 'circle'} size={18} color={read ? colors.primary : colors.mutedForeground} />
+                  </Pressable>
+                  <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+                </>
+              )}
             </Pressable>
           );
         }}
@@ -304,6 +441,30 @@ export default function ChaptersScreen() {
         initialNumToRender={30}
         windowSize={7}
       />
+
+      {selectionMode ? (
+        <Animated.View entering={SlideInUp.duration(180)} style={[styles.selectionBar, { backgroundColor: colors.card, borderColor: colors.border, paddingBottom: insets.bottom + 8 }]}>
+          <Pressable accessibilityLabel="Download selected chapters" accessibilityRole="button" disabled={!catalogNovel || selectionBusy} onPress={() => void downloadSelectedChapters()} style={({ pressed }) => [styles.selectionAction, { opacity: !catalogNovel || selectionBusy ? 0.35 : pressed ? 0.65 : 1 }]}>
+            <Feather name="download" size={21} color={colors.foreground} />
+          </Pressable>
+          <Pressable accessibilityLabel="Delete selected downloads" accessibilityRole="button" onPress={deleteSelectedDownloads} style={({ pressed }) => [styles.selectionAction, { opacity: pressed ? 0.65 : 1 }]}>
+            <Feather name="trash-2" size={21} color={colors.foreground} />
+          </Pressable>
+          <Pressable accessibilityLabel="Mark selected chapters read" accessibilityRole="button" onPress={() => updateSelectedReadState(true)} style={({ pressed }) => [styles.selectionAction, { opacity: pressed ? 0.65 : 1 }]}>
+            <Feather name="check-square" size={21} color={colors.foreground} />
+          </Pressable>
+          <Pressable accessibilityLabel="Mark selected chapters unread" accessibilityRole="button" onPress={() => updateSelectedReadState(false)} style={({ pressed }) => [styles.selectionAction, { opacity: pressed ? 0.65 : 1 }]}>
+            <Feather name="square" size={21} color={colors.foreground} />
+          </Pressable>
+          <Pressable accessibilityLabel="Bookmark selected chapters" accessibilityRole="button" onPress={() => updateSelectedBookmarks(true)} style={({ pressed }) => [styles.selectionAction, { opacity: pressed ? 0.65 : 1 }]}>
+            <Feather name="bookmark" size={21} color={colors.foreground} />
+          </Pressable>
+          <Pressable accessibilityLabel="Remove selected bookmarks" accessibilityRole="button" onPress={() => updateSelectedBookmarks(false)} style={({ pressed }) => [styles.selectionAction, { opacity: pressed ? 0.65 : 1 }]}>
+            <Feather name="bookmark" size={21} color={colors.foreground} />
+            <View style={[styles.bookmarkMinus, { backgroundColor: colors.foreground }]} />
+          </Pressable>
+        </Animated.View>
+      ) : null}
 
       <Modal animationType="fade" onRequestClose={() => setJumpOpen(false)} transparent visible={jumpOpen}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalRoot}>
@@ -355,6 +516,7 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 14 },
   headerCopy: { flex: 1 },
   headerSpacer: { width: 23 },
+  selectionHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
   eyebrow: { fontFamily: 'Inter_600SemiBold', fontSize: 9, letterSpacing: 1.2 },
   title: { fontFamily: 'Georgia', fontSize: 19, marginTop: 3 },
   intro: { paddingHorizontal: 22, paddingTop: 22, flexDirection: 'row', gap: 16 },
@@ -385,6 +547,14 @@ const styles = StyleSheet.create({
   chapterCopy: { flex: 1 },
   chapterTitle: { fontFamily: 'Inter_500Medium', fontSize: 13 },
   chapterStatus: { fontFamily: 'Inter_400Regular', fontSize: 10, marginTop: 4 },
+  selectionChapterRow: { marginHorizontal: 0, paddingHorizontal: 22 },
+  selectionSummary: { minHeight: 50, paddingHorizontal: 22, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  selectionSummaryText: { fontFamily: 'Inter_500Medium', fontSize: 11 },
+  selectFromAction: { minHeight: 30, borderWidth: 1, borderRadius: 15, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  selectFromActionText: { fontFamily: 'Inter_500Medium', fontSize: 10 },
+  selectionBar: { position: 'absolute', left: 14, right: 14, bottom: 0, borderWidth: 1, borderRadius: 18, paddingTop: 10, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', gap: 4, elevation: 10, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 14, shadowOffset: { width: 0, height: 5 } },
+  selectionAction: { width: 42, height: 38, alignItems: 'center', justifyContent: 'center' },
+  bookmarkMinus: { width: 9, height: 2, position: 'absolute', right: 8, bottom: 8 },
   emptyState: { paddingHorizontal: 22, paddingTop: 30, alignItems: 'center' },
   emptyTitle: { fontFamily: 'Georgia', fontSize: 17 },
   emptyCopy: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 7 },

@@ -42,6 +42,7 @@ export type PrimeSourceSearchResult = {
 };
 
 const REQUEST_TIMEOUT_MS = 20_000;
+const SEARCH_TIMEOUT_MS = 8_000;
 const africanStorybookCatalogCache = new Map<string, Promise<string>>();
 const requestHeaders = {
   Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
@@ -56,9 +57,9 @@ function sourceError(error: unknown) {
   return 'Source could not be reached.';
 }
 
-async function requestText(url: string, init?: RequestInit) {
+async function requestText(url: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       ...init,
@@ -72,11 +73,11 @@ async function requestText(url: string, init?: RequestInit) {
   }
 }
 
-async function requestJson<T>(url: string, init?: RequestInit) {
+async function requestJson<T>(url: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS) {
   const text = await requestText(url, {
     ...init,
     headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
-  });
+  }, timeoutMs);
   return JSON.parse(text) as T;
 }
 
@@ -162,6 +163,21 @@ function titleFromUrl(url: string) {
 
 function chapterId(novel: PrimeNovel, url: string) {
   return `${novel.id}:${url}`;
+}
+
+function cleanHtmlParagraphs(html: string) {
+  return cleanParagraphs(parseDocument(`<body>${html}</body>`), ['body']);
+}
+
+function stripUrlQuery(url: string) {
+  try {
+    const parsed = new URL(url);
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return url;
+  }
 }
 
 function parseRoyalRoadSearch(source: PrimeSourceDefinition, html: string) {
@@ -437,6 +453,325 @@ function parseSufficientVelocityDetails(source: PrimeSourceDefinition, html: str
   return { ...novel, chapterCount: chapters.length, chapters } satisfies PrimeNovelDetails;
 }
 
+function parseKnoxTSearch(source: PrimeSourceDefinition, html: string) {
+  const root = parseDocument(html);
+  return nodes(root, '.listupd article').flatMap((item) => {
+    const link = selectOne('h2 a, .ntitle a, a[href]', item);
+    const url = absoluteUrl(nodeAttribute(link, 'href'), source.siteUrl);
+    if (!link || !url) return [];
+    return [{
+      id: novelId(source.id, url),
+      sourceId: source.id,
+      title: titleFromLink(link, titleFromUrl(url)),
+      url,
+      coverUrl: imageUrl(selectOne('img', item), source.siteUrl),
+      description: nodeText(selectOne('.contexcerpt', item)) || undefined,
+    } satisfies PrimeNovel];
+  });
+}
+
+function parseKnoxTDetails(source: PrimeSourceDefinition, html: string, url: string) {
+  const root = parseDocument(html);
+  const novel: PrimeNovel = {
+    id: novelId(source.id, url),
+    sourceId: source.id,
+    title: nodeText(firstNode(root, ['.entry-title', 'h1'])) || titleFromUrl(url),
+    url,
+    author: nodes(root, '.spe > span:nth-child(3) a').map((item) => nodeText(item)).filter(Boolean).join(', ') || undefined,
+    coverUrl: imageUrl(firstNode(root, ['.thumb img', '.summary_image img', 'img']), source.siteUrl),
+    description: nodeText(firstNode(root, ['.entry-content', '.description'])) || undefined,
+    genres: nodes(root, '.genxed a, .genres-content a').map((item) => nodeText(item)).filter(Boolean),
+    status: nodeText(firstNode(root, ['.spe > span:nth-child(1)', '.status'])) || undefined,
+  };
+  const links = nodes(root, '.eplister.eplisterfull li a');
+  const chapters = [...links].reverse().flatMap((link, index) => {
+    const chapterUrl = absoluteUrl(nodeAttribute(link, 'href'), source.siteUrl);
+    if (!chapterUrl) return [];
+    const number = nodeText(selectOne('.epl-num', link)) || String(index + 1);
+    const chapterTitle = nodeText(selectOne('.epl-title', link)) || titleFromLink(link, `Chapter ${index + 1}`);
+    return [{
+      id: chapterId(novel, chapterUrl),
+      novelId: novel.id,
+      number: index + 1,
+      title: `[${number}] ${chapterTitle}`,
+      url: chapterUrl,
+    } satisfies PrimeChapter];
+  });
+  return { ...novel, chapterCount: chapters.length, chapters } satisfies PrimeNovelDetails;
+}
+
+type GenesisNovelRecord = {
+  id?: string;
+  novel_title?: string;
+  slug?: string;
+  abbreviation?: string;
+  synopsis?: string;
+  coverFile?: { filename_disk?: string };
+  author?: string;
+  serialization?: string;
+  genres?: Array<{ name?: string; genres_id?: number }>;
+  tags?: Array<{ name?: string; slug?: string }>;
+};
+
+type GenesisChapterRecord = {
+  id?: number | string;
+  chapter_number?: number;
+  chapter_title?: string;
+  date_published?: string;
+  isPaid?: boolean;
+  isUnlocked?: boolean;
+};
+
+function genesisApiUrl(path: string, params?: Record<string, string>) {
+  const url = new URL(path, 'https://genesistudio.com');
+  Object.entries(params ?? {}).forEach(([key, value]) => url.searchParams.set(key, value));
+  return url.toString();
+}
+
+function genesisCoverUrl(record: GenesisNovelRecord) {
+  const filename = record.coverFile?.filename_disk;
+  return filename
+    ? `https://genesistudio.com/cdn-cgi/image/width=256,format=avif/https://api.genesistudio.com/storage/v1/object/public/directus/${filename}`
+    : undefined;
+}
+
+function genesisSlugFromUrl(url: string) {
+  try {
+    return new URL(url).pathname.match(/\/novels\/([^/]+)/)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+function genesisNovelUrl(source: PrimeSourceDefinition, slug: string) {
+  return `${source.siteUrl.replace(/\/$/, '')}/novels/${slug}`;
+}
+
+function parseGenesisSearch(source: PrimeSourceDefinition, records: GenesisNovelRecord[]) {
+  return records.flatMap((record) => {
+    const slug = record.slug ?? record.abbreviation;
+    if (!slug || !record.novel_title) return [];
+    const url = genesisNovelUrl(source, slug);
+    return [{
+      id: novelId(source.id, url),
+      sourceId: source.id,
+      sourceRecordId: record.id,
+      title: record.novel_title,
+      url,
+      coverUrl: genesisCoverUrl(record),
+      description: record.synopsis ? nodeText(parseDocument(record.synopsis)) : undefined,
+      author: record.author || undefined,
+      status: record.serialization || undefined,
+      genres: record.genres?.map((genre) => genre.name).filter((genre): genre is string => Boolean(genre)),
+    } satisfies PrimeNovel];
+  }).slice(0, 40);
+}
+
+function genesisChapterList(data: { data?: { chapters?: GenesisChapterRecord[] } } | GenesisChapterRecord[]) {
+  return Array.isArray(data) ? data : data.data?.chapters ?? [];
+}
+
+function parseGenesisDetails(source: PrimeSourceDefinition, novel: PrimeNovel, record: GenesisNovelRecord, chapterData: GenesisChapterRecord[]) {
+  const slug = record.slug ?? record.abbreviation ?? genesisSlugFromUrl(novel.url);
+  const details: PrimeNovel = {
+    ...novel,
+    title: record.novel_title ?? novel.title,
+    author: record.author || novel.author,
+    coverUrl: genesisCoverUrl(record) ?? novel.coverUrl,
+    description: record.synopsis ? nodeText(parseDocument(record.synopsis)) : novel.description,
+    status: record.serialization || novel.status,
+    genres: record.genres?.map((genre) => genre.name).filter((genre): genre is string => Boolean(genre)) ?? novel.genres,
+  };
+  const chapters = chapterData
+    .filter((chapter) => chapter.id !== undefined && chapter.chapter_number !== undefined && (!chapter.isPaid || chapter.isUnlocked))
+    .sort((left, right) => (left.chapter_number ?? 0) - (right.chapter_number ?? 0))
+    .flatMap((chapter) => {
+      if (!slug || chapter.id === undefined || chapter.chapter_number === undefined) return [];
+      const chapterUrl = `${genesisNovelUrl(source, slug)}/chapter-${chapter.chapter_number}`;
+      return [{
+        id: chapterId(details, chapterUrl),
+        novelId: details.id,
+        number: chapter.chapter_number,
+        title: chapter.chapter_title || `Chapter ${chapter.chapter_number}`,
+        url: chapterUrl,
+        releaseDate: chapter.date_published?.slice(0, 10),
+      } satisfies PrimeChapter];
+    });
+  return { ...details, chapterCount: chapters.length, chapters } satisfies PrimeNovelDetails;
+}
+
+function parseXenforoSearch(source: PrimeSourceDefinition, html: string) {
+  const root = parseDocument(html);
+  const seen = new Set<string>();
+  return nodes(root, '.block-body .contentRow').flatMap((item) => {
+    const link = selectOne('.contentRow-title a[href*="/threads/"]', item);
+    const rawUrl = absoluteUrl(nodeAttribute(link, 'href'), source.siteUrl);
+    const url = rawUrl ? forumThreadUrl(rawUrl) : undefined;
+    if (!link || !url || seen.has(url)) return [];
+    seen.add(url);
+    return [{
+      id: novelId(source.id, url),
+      sourceId: source.id,
+      title: titleFromLink(link, titleFromUrl(url)),
+      url,
+      coverUrl: imageUrl(selectOne('.contentRow-figure img', item), source.siteUrl),
+      author: nodeText(selectOne('a.username', item)) || undefined,
+      genres: nodes(item, '.js-tagList a').map((tag) => nodeText(tag)).filter(Boolean),
+    } satisfies PrimeNovel];
+  });
+}
+
+function parseXenforoDetails(source: PrimeSourceDefinition, html: string, url: string) {
+  const root = parseDocument(html);
+  const novel: PrimeNovel = {
+    id: novelId(source.id, url),
+    sourceId: source.id,
+    title: nodeText(firstNode(root, ['.p-title-value', 'h1'])) || titleFromUrl(url),
+    url,
+    author: nodeText(firstNode(root, ['.threadmarkListingHeader .username', '.p-description a.username', 'article.js-post .username'])) || undefined,
+    coverUrl: imageUrl(firstNode(root, ['.threadmarkListingHeader-icon img', 'article.js-post .avatar img']), source.siteUrl),
+    description: nodeText(firstNode(root, ['.threadmarkListingHeader-extraInfo .bbWrapper', 'meta[name="description"]'])) || undefined,
+    genres: nodes(root, '.threadmarkListingHeader-tags a, .js-tagList a').map((tag) => nodeText(tag)).filter(Boolean),
+  };
+  const rows = nodes(root, '.structItemContainer .structItem');
+  const chapters = rows.flatMap((row, index) => {
+    const link = selectOne('.structItem-title a', row);
+    const chapterUrl = absoluteUrl(nodeAttribute(link, 'href'), source.siteUrl);
+    if (!chapterUrl) return [];
+    return [{
+      id: chapterId(novel, chapterUrl),
+      novelId: novel.id,
+      number: index + 1,
+      title: titleFromLink(link, `Chapter ${index + 1}`),
+      url: chapterUrl,
+      releaseDate: nodeAttribute(selectOne('time.structItem-latestDate', row), 'datetime')?.slice(0, 10),
+    } satisfies PrimeChapter];
+  });
+  return { ...novel, chapterCount: chapters.length, chapters } satisfies PrimeNovelDetails;
+}
+
+function parseLightNovelsTranslationsSearch(source: PrimeSourceDefinition, html: string) {
+  const root = parseDocument(html);
+  return nodes(root, 'section.read_list-story .wrap_read_list-story > .read_list-story-item').flatMap((item) => {
+    const link = selectOne('.read_list-story-item--title a', item);
+    const rawUrl = absoluteUrl(nodeAttribute(link, 'href'), source.siteUrl);
+    const url = rawUrl ? stripUrlQuery(rawUrl) : undefined;
+    if (!link || !url) return [];
+    return [{ id: novelId(source.id, url), sourceId: source.id, title: titleFromLink(link, titleFromUrl(url)), url, coverUrl: imageUrl(selectOne('.item_thumb img', item), source.siteUrl) } satisfies PrimeNovel];
+  });
+}
+
+function parseLightNovelsTranslationsDetails(source: PrimeSourceDefinition, html: string, url: string) {
+  const root = parseDocument(html);
+  const novel: PrimeNovel = {
+    id: novelId(source.id, url),
+    sourceId: source.id,
+    title: nodeText(firstNode(root, ['.novel_title', 'h1'])) || titleFromUrl(url),
+    url,
+    coverUrl: imageUrl(firstNode(root, ['.novel-image img', 'img']), source.siteUrl),
+    description: nodeText(firstNode(root, ['#about .novel_text', '.novel_text'])) || undefined,
+    status: nodeText(firstNode(root, ['.novel_status', '.status'])) || undefined,
+    genres: nodes(root, '.novel_tags_item > span').map((tag) => nodeText(tag)).filter(Boolean),
+    author: nodes(root, '.novel_detail_info > ul > li').map((item) => nodeText(item)).find((value) => /^author:/i.test(value))?.replace(/^author:\s*/i, ''),
+  };
+  const chapters = nodes(root, '.novel_list_chapter_content .chapter-item a, .chapter-item a').flatMap((link, index) => {
+    const chapterUrl = absoluteUrl(nodeAttribute(link, 'href'), source.siteUrl);
+    const className = nodeAttribute(link.parent as Element | null, 'class') ?? '';
+    if (!chapterUrl || (/lock/i.test(className) && !/unlock/i.test(className))) return [];
+    return [{ id: chapterId(novel, chapterUrl), novelId: novel.id, number: index + 1, title: titleFromLink(link, `Chapter ${index + 1}`), url: chapterUrl } satisfies PrimeChapter];
+  });
+  return { ...novel, chapterCount: chapters.length, chapters } satisfies PrimeNovelDetails;
+}
+
+function parseSoafpSearch(source: PrimeSourceDefinition, html: string) {
+  const root = parseDocument(html);
+  return nodes(root, '.search-results li.search-result-item').flatMap((item) => {
+    const link = selectOne('a.search-result-link', item);
+    const url = absoluteUrl(nodeAttribute(link, 'href'), source.siteUrl);
+    if (!link || !url) return [];
+    return [{ id: novelId(source.id, url), sourceId: source.id, title: titleFromLink(selectOne('.search-result-title', item) ?? link, titleFromUrl(url)), url, coverUrl: imageUrl(selectOne('.search-result-cover img', item), source.siteUrl), description: nodeText(selectOne('.search-result-synopsis', item)) || undefined } satisfies PrimeNovel];
+  });
+}
+
+function parseSoafpDetails(source: PrimeSourceDefinition, html: string, url: string) {
+  const root = parseDocument(html);
+  const novel: PrimeNovel = {
+    id: novelId(source.id, url),
+    sourceId: source.id,
+    title: nodeText(firstNode(root, ['#primary article .entry-title', 'h1'])) || titleFromUrl(url),
+    url,
+    coverUrl: imageUrl(firstNode(root, ['#primary article .wp-block-image img', 'article img']), source.siteUrl),
+    description: nodes(root, 'article .entry-synopsis > p, article .entry-content > p').map((item) => nodeText(item)).filter(Boolean).join(' ') || undefined,
+    genres: nodes(root, '.entry-details .genres-links > a').map((item) => nodeText(item)).filter(Boolean),
+  };
+  const chapters = nodes(root, '.chapter-list li a, .lcp_catlist li a, article .entry-content a[href*="/novel/"]').flatMap((link, index) => {
+    const chapterUrl = absoluteUrl(nodeAttribute(link, 'href'), source.siteUrl);
+    if (!chapterUrl || stripUrlQuery(chapterUrl) === stripUrlQuery(url)) return [];
+    return [{ id: chapterId(novel, chapterUrl), novelId: novel.id, number: index + 1, title: titleFromLink(link, `Chapter ${index + 1}`), url: chapterUrl } satisfies PrimeChapter];
+  });
+  return { ...novel, chapterCount: chapters.length, chapters } satisfies PrimeNovelDetails;
+}
+
+type DragonholicSearchRecord = { title?: string; url?: string; thumbnail?: string; excerpt?: string };
+type DragonholicChapter = { id?: string; name?: string; slug?: string; chapter_order?: string | number; is_premium?: boolean; created_at?: string };
+
+function parseDragonholicSearch(source: PrimeSourceDefinition, data: { results?: DragonholicSearchRecord[] }) {
+  return (data.results ?? []).flatMap((record) => {
+    const url = absoluteUrl(record.url, source.siteUrl);
+    if (!url || !record.title) return [];
+    return [{ id: novelId(source.id, url), sourceId: source.id, title: record.title, url, coverUrl: record.thumbnail, description: record.excerpt } satisfies PrimeNovel];
+  });
+}
+
+function parseDragonholicDetails(source: PrimeSourceDefinition, html: string, novel: PrimeNovel, chaptersData: DragonholicChapter[]) {
+  const root = parseDocument(html);
+  const details: PrimeNovel = {
+    ...novel,
+    title: nodeText(firstNode(root, ['h1', '.entry-title'])) || novel.title,
+    coverUrl: imageUrl(firstNode(root, ['.summary_image img', 'img']), source.siteUrl) ?? novel.coverUrl,
+    description: nodes(root, '.prose p').map((item) => nodeText(item)).filter(Boolean).join(' ') || novel.description,
+    genres: nodes(root, '.genres a, .genre a').map((item) => nodeText(item)).filter(Boolean),
+  };
+  const chapters = chaptersData
+    .filter((chapter) => chapter.slug && chapter.chapter_order !== undefined && !chapter.is_premium)
+    .sort((left, right) => Number(left.chapter_order) - Number(right.chapter_order))
+    .flatMap((chapter) => {
+      if (!chapter.slug || chapter.chapter_order === undefined) return [];
+      const chapterUrl = `${novel.url.replace(/\/$/, '')}/${chapter.slug}/`;
+      return [{ id: chapterId(details, chapterUrl), novelId: details.id, number: Number(chapter.chapter_order), title: chapter.name || `Chapter ${chapter.chapter_order}`, url: chapterUrl, releaseDate: chapter.created_at?.slice(0, 10) } satisfies PrimeChapter];
+    });
+  return { ...details, chapterCount: chapters.length, chapters } satisfies PrimeNovelDetails;
+}
+
+function parseWuxiaClickSearch(source: PrimeSourceDefinition, html: string) {
+  const root = parseDocument(html);
+  return nodes(root, '.mantine-Grid-root > div > div > a').flatMap((item) => {
+    const url = absoluteUrl(nodeAttribute(item, 'href'), source.siteUrl);
+    if (!url) return [];
+    const title = nodeText(firstNode(item, ['div[data-last="true"] .mantine-Text-root', '[data-last="true"] .mantine-Text-root'])) || titleFromUrl(url);
+    return [{ id: novelId(source.id, url), sourceId: source.id, title, url, coverUrl: imageUrl(selectOne('img', item), source.siteUrl) } satisfies PrimeNovel];
+  });
+}
+
+function parseWuxiaClickDetails(source: PrimeSourceDefinition, html: string, url: string, chapters: Array<{ id?: number; index?: number; title?: string; novSlugChapSlug?: string; timeAdded?: string }>) {
+  const root = parseDocument(html);
+  const title = nodes(root, '.mantine-Title-root').map((item) => nodeText(item)).find((value) => value && value !== 'WuxiaClick') || titleFromUrl(url);
+  const novel: PrimeNovel = {
+    id: novelId(source.id, url),
+    sourceId: source.id,
+    title,
+    url,
+    coverUrl: imageUrl(firstNode(root, ['.mantine-Image-image', 'img']), source.siteUrl),
+    description: nodeText(firstNode(root, ['.mantine-Spoiler-content'])) || undefined,
+  };
+  const parsedChapters = chapters.flatMap((chapter, index) => {
+    if (!chapter.novSlugChapSlug) return [];
+    const chapterUrl = `${source.siteUrl.replace(/\/$/, '')}/chapter/${chapter.novSlugChapSlug}`;
+    return [{ id: chapterId(novel, chapterUrl), novelId: novel.id, number: chapter.index ?? index + 1, title: chapter.title || `Chapter ${chapter.index ?? index + 1}`, url: chapterUrl, releaseDate: chapter.timeAdded } satisfies PrimeChapter];
+  }).sort((left, right) => left.number - right.number);
+  return { ...novel, chapterCount: parsedChapters.length, chapters: parsedChapters } satisfies PrimeNovelDetails;
+}
+
 type GutenbergBookRecord = {
   id?: number;
   title?: string;
@@ -686,12 +1021,15 @@ function cleanLocText(text: string) {
 }
 
 function decodeAfricanValue(value: string) {
-  return nodeText(parseDocument(value.replace(/\\(["'\\])/g, '$1')));
+  return normalizeText(DomUtils.textContent(parseDocument(value.replace(/\\(["'\\])/g, '$1'))));
 }
 
 function africanField(record: string, field: string) {
-  const match = record.match(new RegExp(field + ':"([^"]*)"'));
-  return match ? decodeAfricanValue(match[1]) : '';
+  const marker = `${field}:"`;
+  const start = record.indexOf(marker);
+  if (start < 0) return '';
+  const value = record.slice(start + marker.length).match(/^(?:\\.|[^"\\])*/)?.[0] ?? '';
+  return decodeAfricanValue(value);
 }
 
 function parseAfricanStorybookSearch(source: PrimeSourceDefinition, script: string, query: string) {
@@ -739,10 +1077,10 @@ function cleanGutenbergText(text: string) {
     .filter((paragraph) => paragraph.length > 0);
 }
 
-function africanStorybookCatalog(source: PrimeSourceDefinition) {
+function africanStorybookCatalog(source: PrimeSourceDefinition, timeoutMs = REQUEST_TIMEOUT_MS) {
   const cached = africanStorybookCatalogCache.get(source.siteUrl);
   if (cached) return cached;
-  const request = requestText(`${source.siteUrl}/lists/booklist.approved.php`).catch((error: unknown) => {
+  const request = requestText(`${source.siteUrl}/lists/booklist.approved.php`, undefined, timeoutMs).catch((error: unknown) => {
     africanStorybookCatalogCache.delete(source.siteUrl);
     throw error;
   });
@@ -750,13 +1088,13 @@ function africanStorybookCatalog(source: PrimeSourceDefinition) {
   return request;
 }
 
-async function searchSource(source: PrimeSourceDefinition, query: string): Promise<PrimeNovel[]> {
+async function searchSource(source: PrimeSourceDefinition, query: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<PrimeNovel[]> {
   const encodedQuery = encodeURIComponent(query.trim());
   switch (source.adapter) {
     case 'royal-road':
-      return parseRoyalRoadSearch(source, await requestText(`${source.siteUrl}/fictions/search?keyword=${encodedQuery}&page=1`));
+      return parseRoyalRoadSearch(source, await requestText(`${source.siteUrl}/fictions/search?keyword=${encodedQuery}&page=1`, undefined, timeoutMs));
     case 'novel-buddy': {
-      const data = await requestJson<{ data?: { items?: Array<{ id?: string; name?: string; cover?: string; url?: string }> } }>(`https://api.novelbuddy.me/titles/search?q=${encodedQuery}&page=1`);
+      const data = await requestJson<{ data?: { items?: Array<{ id?: string; name?: string; cover?: string; url?: string }> } }>(`https://api.novelbuddy.me/titles/search?q=${encodedQuery}&page=1`, undefined, timeoutMs);
       return (data.data?.items ?? []).flatMap((item) => {
         const url = absoluteUrl(item.url, source.siteUrl);
         if (!url || !item.name) return [];
@@ -764,31 +1102,31 @@ async function searchSource(source: PrimeSourceDefinition, query: string): Promi
       });
     }
     case 'wattpad': {
-      const data = await requestJson<{ stories?: Array<{ title?: string; cover?: string; url?: string }> }>(`${source.siteUrl}/v4/search/stories?query=${encodedQuery}&free=1&fields=stories(title,cover,url),nexturl&limit=20&mature=true&offset=0`);
+      const data = await requestJson<{ stories?: Array<{ title?: string; cover?: string; url?: string }> }>(`${source.siteUrl}/v4/search/stories?query=${encodedQuery}&free=1&fields=stories(title,cover,url),nexturl&limit=20&mature=true&offset=0`, undefined, timeoutMs);
       return parseWattpadSearch(source, data);
     }
     case 'asian-hobbyist': {
-      const home = parseDocument(await requestText(source.siteUrl));
+      const home = parseDocument(await requestText(source.siteUrl, undefined, timeoutMs));
       const encoding = nodeAttribute(firstNode(home, ['meta[name="enc"]']), 'content') ?? '';
       const body = new URLSearchParams({ action: 'gsr', enc: encoding, src: query });
-      const ajaxHtml = await requestText(`${source.siteUrl}/wp-admin/admin-ajax.php`, { method: 'POST', body: body.toString(), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+      const ajaxHtml = await requestText(`${source.siteUrl}/wp-admin/admin-ajax.php`, { method: 'POST', body: body.toString(), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }, timeoutMs);
       if (ajaxHtml.trim() !== 'Shit!') return parseAsianSearch(source, ajaxHtml);
       const latest = parseAsianSearch(source, DomUtils.getOuterHTML(home));
       const normalizedQuery = query.toLowerCase();
       return latest.filter((novel) => novel.title.toLowerCase().includes(normalizedQuery));
     }
     case 'read-from-net':
-      return parseReadFromNetSearch(source, await requestText(`${source.siteUrl}/build_in_search/?q=${encodedQuery}`));
+      return parseReadFromNetSearch(source, await requestText(`${source.siteUrl}/build_in_search/?q=${encodedQuery}`, undefined, timeoutMs));
     case 'creative-novels':
-      return parseCreativeSearch(source, await requestText(`${source.siteUrl}/?s=${encodedQuery}`));
+      return parseCreativeSearch(source, await requestText(`${source.siteUrl}/?s=${encodedQuery}`, undefined, timeoutMs));
     case 'paw-read':
-      return parsePawReadSearch(source, await requestText(`${source.siteUrl}/search/?keywords=${encodedQuery}`));
+      return parsePawReadSearch(source, await requestText(`${source.siteUrl}/search/?keywords=${encodedQuery}`, undefined, timeoutMs));
     case 'read-novel-full':
-      return parseReadNovelFullSearch(source, await requestText(`${source.siteUrl}/novel-list/search?keyword=${encodedQuery}&page=1`));
+      return parseReadNovelFullSearch(source, await requestText(`${source.siteUrl}/novel-list/search?keyword=${encodedQuery}&page=1`, undefined, timeoutMs));
     case 'sufficient-velocity':
-      return parseSufficientVelocitySearch(source, await requestText(`${source.siteUrl}/search/search?keywords=${encodedQuery}`));
+      return parseSufficientVelocitySearch(source, await requestText(`${source.siteUrl}/search/search?keywords=${encodedQuery}`, undefined, timeoutMs));
     case 'project-gutenberg': {
-      const data = await requestJson<{ results?: GutenbergBookRecord[] }>(`https://gutendex.com/books?search=${encodedQuery}&languages=en`);
+      const data = await requestJson<{ results?: GutenbergBookRecord[] }>(`https://gutendex.com/books?search=${encodedQuery}&languages=en`, undefined, timeoutMs);
       return (data.results ?? []).flatMap((record) => {
         const novel = parseGutenbergNovel(source, record);
         return novel ? [novel] : [];
@@ -802,11 +1140,11 @@ async function searchSource(source: PrimeSourceDefinition, query: string): Promi
         srprop: 'snippet',
         srsearch: `intitle:"${query.trim()}"`,
         srlimit: '40',
-      }));
+      }), undefined, timeoutMs);
       return parseWikisourceSearch(source, data);
     }
     case 'library-of-congress': {
-      const data = await requestJson<LocSearchResponse>(`https://www.loc.gov/books/?q=${encodedQuery}&fo=json&c=20`);
+      const data = await requestJson<LocSearchResponse>(`https://www.loc.gov/books/?q=${encodedQuery}&fo=json&c=20`, undefined, timeoutMs);
       return (data.content?.results ?? []).flatMap((record) => {
         if (record.access_restricted || !locTextUrl(record)) return [];
         const novel = parseLocNovel(source, record);
@@ -815,11 +1153,56 @@ async function searchSource(source: PrimeSourceDefinition, query: string): Promi
     }
     case 'african-storybook':
       if (query.trim().length < 2) return [];
-      return parseAfricanStorybookSearch(source, await africanStorybookCatalog(source), query);
+      return parseAfricanStorybookSearch(source, await africanStorybookCatalog(source, timeoutMs), query);
+    case 'knox-t':
+      return parseKnoxTSearch(source, await requestText(`${source.siteUrl}/page/1/?s=${encodedQuery}`, undefined, timeoutMs));
+    case 'genesis-studio':
+      return parseGenesisSearch(source, await requestJson<GenesisNovelRecord[]>(genesisApiUrl('/api/directus/novels', {
+        'filter[novel_title][_contains]': query.trim(),
+        limit: '-1',
+      }), undefined, timeoutMs));
+    case 'questionable-questing': {
+      const forumIds = ['19', '20', '29', '12'];
+      const results = await Promise.all(forumIds.map(async (forumId) => {
+        const url = new URL('/search/1/', `${source.siteUrl.replace(/\/$/, '')}/`);
+        url.search = new URLSearchParams({
+          t: 'post',
+          'c[child_nodes]': '1',
+          'c[nodes][0]': forumId,
+          'c[threadmark_categories][0]': '1',
+          'c[title_only]': '1',
+          o: 'relevance',
+          g: '1',
+          q: query,
+        }).toString();
+        return parseXenforoSearch(source, await requestText(url.toString(), undefined, timeoutMs));
+      }));
+      const seen = new Set<string>();
+      return results.flat().filter((novel) => {
+        if (seen.has(novel.url)) return false;
+        seen.add(novel.url);
+        return true;
+      });
+    }
+    case 'light-novels-translations': {
+      const url = new URL('/read/page/1/', `${source.siteUrl.replace(/\/$/, '')}/`);
+      url.search = new URLSearchParams({ sort: 'most-recent', type: 'all', status: 'all' }).toString();
+      return parseLightNovelsTranslationsSearch(source, await requestText(url.toString(), {
+        method: 'POST',
+        body: new URLSearchParams({ 'field-search': query, submit: '' }).toString(),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      }, timeoutMs));
+    }
+    case 'soafp-translations':
+      return parseSoafpSearch(source, await requestText(`${source.siteUrl}/search/?title=${encodedQuery}`, undefined, timeoutMs));
+    case 'dragonholic':
+      return parseDragonholicSearch(source, await requestJson<{ results?: DragonholicSearchRecord[] }>(`${source.siteUrl}/api/search?q=${encodedQuery}&per_page=10&page=1&types%5B%5D=series`, undefined, timeoutMs));
+    case 'wuxia-click':
+      return parseWuxiaClickSearch(source, await requestText(`${source.siteUrl}/search/${encodedQuery}?page=1`, undefined, timeoutMs));
     case 'wuxia-world-site':
     case 'light-novel-heaven':
     case 'sleepy-translations':
-      return parseMadaraSearch(source, await requestText(`${source.siteUrl}/page/1/?s=${encodedQuery}&post_type=wp-manga`));
+      return parseMadaraSearch(source, await requestText(`${source.siteUrl}/page/1/?s=${encodedQuery}&post_type=wp-manga`, undefined, timeoutMs));
   }
 }
 
@@ -1072,9 +1455,24 @@ async function getNovelDetails(source: PrimeSourceDefinition, novel: PrimeNovel)
     ]);
     return parseNovelBuddyApiDetails(source, novel, titleResponse.data?.title ?? {}, chapterResponse.data?.chapters ?? []);
   }
+  if (source.adapter === 'genesis-studio') {
+    const slug = genesisSlugFromUrl(novel.url);
+    const records = await requestJson<GenesisNovelRecord[]>(genesisApiUrl('/api/directus/novels', novel.sourceRecordId
+      ? { 'filter[id]': novel.sourceRecordId, limit: '1' }
+      : { 'filter[slug]': slug ?? '', limit: '1' }));
+    const record = records[0];
+    if (!record?.id) throw new Error('This Genesis Studio novel could not be loaded.');
+    const chapterResponse = await requestJson<{ data?: { chapters?: GenesisChapterRecord[] } }>(`${source.siteUrl}/api/novels-chapter/${encodeURIComponent(record.id)}`);
+    return parseGenesisDetails(source, novel, record, genesisChapterList(chapterResponse));
+  }
+  if (source.adapter === 'questionable-questing') {
+    const threadmarksUrl = `${novel.url.replace(/\/$/, '')}/threadmarks?per_page=200`;
+    return parseXenforoDetails(source, await requestText(threadmarksUrl), novel.url);
+  }
   const html = await requestText(novel.url, source.adapter === 'wattpad' ? { headers: { Referer: 'https://www.wattpad.com/' } } : undefined);
   if (source.adapter === 'royal-road') return parseRoyalRoadDetails(source, html, novel.url);
   if (source.adapter === 'wattpad') return parseWattpadDetails(source, html, novel.url);
+  if (source.adapter === 'knox-t') return parseKnoxTDetails(source, html, novel.url);
 
   if (source.adapter === 'wuxia-world-site' || source.adapter === 'light-novel-heaven' || source.adapter === 'sleepy-translations') {
     const details = parseMadaraDetails(source, html, novel.url);
@@ -1090,7 +1488,23 @@ async function getNovelDetails(source: PrimeSourceDefinition, novel: PrimeNovel)
   if (source.adapter === 'read-novel-full') return parseReadNovelFullDetails(source, html, novel.url);
   if (source.adapter === 'read-from-net') return parseReadFromNetDetails(source, html, novel.url);
   if (source.adapter === 'sufficient-velocity') return parseSufficientVelocityDetails(source, html, novel.url);
-
+  if (source.adapter === 'light-novels-translations') {
+    const detailsHtml = await requestText(`${novel.url}?tab=table_contents`);
+    return parseLightNovelsTranslationsDetails(source, detailsHtml, novel.url);
+  }
+  if (source.adapter === 'soafp-translations') return parseSoafpDetails(source, html, novel.url);
+  if (source.adapter === 'dragonholic') {
+    const seriesId = html.match(/seriesId:\s*(\d+)/)?.[1];
+    if (!seriesId) throw new Error('This Dragonholic series did not expose its chapter list.');
+    const chapterResponse = await requestJson<{ chapters?: DragonholicChapter[] }>(`${source.siteUrl}/api/chapters?series_id=${seriesId}&sort_order=asc&per_page=1000000000`);
+    return parseDragonholicDetails(source, html, novel, chapterResponse.chapters ?? []);
+  }
+  if (source.adapter === 'wuxia-click') {
+    const slug = new URL(novel.url).pathname.match(/^\/novel\/([^/]+)/)?.[1];
+    if (!slug) throw new Error('This WuxiaClick novel URL is invalid.');
+    const chapters = await requestJson<Array<{ id?: number; index?: number; title?: string; novSlugChapSlug?: string; timeAdded?: string }>>(`${source.siteUrl}/api/chapters/${encodeURIComponent(slug)}`);
+    return parseWuxiaClickDetails(source, html, novel.url, chapters);
+  }
   if (source.adapter === 'novel-buddy') {
     const parsed = parseNovelBuddyDetails(source, html, novel.url);
     if (parsed.novelIdFromSite !== undefined) {
@@ -1119,6 +1533,11 @@ function contentSelectors(adapter: PrimeSourceAdapterId) {
     case 'wuxia-world-site':
     case 'light-novel-heaven':
     case 'sleepy-translations': return ['.c-blog-post .text-left', '.c-blog-post .text-left', '#chapter-content', '.text-left'];
+    case 'light-novels-translations': return ['.text_story'];
+    case 'soafp-translations': return ['article .entry-content', '.entry-content'];
+    case 'dragonholic': return ['main .container > .border', '.prose'];
+    case 'genesis-studio': return ['.novel-content'];
+    case 'knox-t': return ['.epcontent.entry-content'];
     default: return ['article', '.entry-content', '.chapter-content', 'main'];
   }
 }
@@ -1159,11 +1578,36 @@ async function getChapterContent(source: PrimeSourceDefinition, chapter: PrimeCh
     if (paragraphs.length === 0) throw new Error('This Library of Congress item did not contain readable text.');
     return { chapter, paragraphs };
   }
+  if (source.adapter === 'genesis-studio') {
+    const match = chapter.url.match(/\/novels\/([^/]+)\/chapter-(\d+)/);
+    if (!match) throw new Error('This Genesis Studio chapter URL is invalid.');
+    const records = await requestJson<GenesisNovelRecord[]>(genesisApiUrl('/api/directus/novels', { 'filter[slug]': match[1], limit: '1' }));
+    const record = records[0];
+    if (!record?.id) throw new Error('This Genesis Studio novel could not be found.');
+    const chapterResponse = await requestJson<{ data?: { chapters?: GenesisChapterRecord[] } }>(`${source.siteUrl}/api/novels-chapter/${encodeURIComponent(record.id)}`);
+    const chapterRecord = genesisChapterList(chapterResponse).find((item) => item.chapter_number === Number(match[2]) && item.id !== undefined);
+    if (!chapterRecord?.id) throw new Error('This Genesis Studio chapter could not be found.');
+    const contentResponse = await requestJson<{ data?: { chapter_content?: string } }>(`${source.siteUrl}/api/chapters/${encodeURIComponent(String(chapterRecord.id))}/content`);
+    const paragraphs = cleanHtmlParagraphs(contentResponse.data?.chapter_content ?? '');
+    if (paragraphs.length === 0) throw new Error('This Genesis Studio chapter did not contain readable text.');
+    return { chapter, paragraphs };
+  }
   const chapterHtml = await requestText(chapter.url, source.adapter === 'wattpad' ? { headers: { Referer: 'https://www.wattpad.com/' } } : undefined);
   if (source.adapter === 'sufficient-velocity') {
     const postId = chapter.url.match(/#(post-\d+)$/)?.[1];
     const paragraphs = postId ? forumPostParagraphs(parseDocument(chapterHtml), `[data-content="${postId}"]`) : [];
     if (paragraphs.length === 0) throw new Error('This chapter did not contain readable text.');
+    return { chapter, paragraphs };
+  }
+  if (source.adapter === 'questionable-questing') {
+    const postId = chapter.url.match(/\/post-(\d+)/)?.[1];
+    const paragraphs = postId ? forumPostParagraphs(parseDocument(chapterHtml), `#js-post-${postId}`) : [];
+    if (paragraphs.length === 0) throw new Error('This Questionable Questing chapter did not contain readable text.');
+    return { chapter, paragraphs };
+  }
+  if (source.adapter === 'wuxia-click') {
+    const paragraphs = nodes(parseDocument(chapterHtml), '#chapterText').map((item) => nodeText(item)).filter(Boolean);
+    if (paragraphs.length === 0) throw new Error('This WuxiaClick chapter did not contain readable text.');
     return { chapter, paragraphs };
   }
   if (source.adapter === 'wattpad') {
@@ -1182,16 +1626,48 @@ async function getChapterContent(source: PrimeSourceDefinition, chapter: PrimeCh
   return { chapter, paragraphs };
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('Search timed out.')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function searchSourceWithTimeout(source: PrimeSourceDefinition, query: string) {
+  try {
+    return { source, novels: await withTimeout(searchSource(source, query, SEARCH_TIMEOUT_MS), SEARCH_TIMEOUT_MS) } satisfies PrimeSourceSearchResult;
+  } catch (error) {
+    return { source, novels: [], error: sourceError(error) } satisfies PrimeSourceSearchResult;
+  }
+}
+
+export async function searchPrimeSourcesIncremental(
+  sources: PrimeSourceDefinition[],
+  query: string,
+  onResult: (result: PrimeSourceSearchResult) => void,
+) {
+  const trimmedQuery = query.trim();
+  if (trimmedQuery.length < 1) return [] as PrimeSourceSearchResult[];
+
+  const results = await Promise.all(sources.map(async (source) => {
+    const result = await searchSourceWithTimeout(source, trimmedQuery);
+    onResult(result);
+    return result;
+  }));
+  return results;
+}
+
 export async function searchPrimeSources(sources: PrimeSourceDefinition[], query: string) {
   const trimmedQuery = query.trim();
   if (trimmedQuery.length < 1) return [] as PrimeSourceSearchResult[];
-  return Promise.all(sources.map(async (source) => {
-    try {
-      return { source, novels: await searchSource(source, trimmedQuery) } satisfies PrimeSourceSearchResult;
-    } catch (error) {
-      return { source, novels: [], error: sourceError(error) } satisfies PrimeSourceSearchResult;
-    }
-  }));
+  return searchPrimeSourcesIncremental(sources, trimmedQuery, () => undefined);
 }
 
 export async function loadPrimeNovel(source: PrimeSourceDefinition, novel: PrimeNovel) {

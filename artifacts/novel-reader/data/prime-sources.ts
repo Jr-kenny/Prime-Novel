@@ -14,7 +14,14 @@ export type PrimeSourceAdapterId =
   | 'project-gutenberg'
   | 'wikisource'
   | 'library-of-congress'
-  | 'african-storybook';
+  | 'african-storybook'
+  | 'knox-t'
+  | 'genesis-studio'
+  | 'questionable-questing'
+  | 'light-novels-translations'
+  | 'soafp-translations'
+  | 'dragonholic'
+  | 'wuxia-click';
 
 export type PrimeSourceDefinition = {
   id: string;
@@ -23,6 +30,7 @@ export type PrimeSourceDefinition = {
   imageUrl: string;
   language: string;
   adapter: PrimeSourceAdapterId;
+  active?: boolean;
   coverage?: string[];
   provenance: {
     repositoryUrl: string;
@@ -199,6 +207,76 @@ export const PRIME_SOURCE_REGISTRY: PrimeSourceDefinition[] = [
     adapter: 'african-storybook',
     coverage: ['african literature', 'children', 'community-published', 'open license', 'inspirational'],
     provenance: { repositoryUrl: 'https://www.africanstorybook.org/terms.html', fileName: 'read/readbook.php', version: 'live', checksum: 'catalogue-adapter-owned' },
+  },
+  {
+    id: 'knox-t',
+    name: 'KnoxT',
+    siteUrl: 'https://knoxt.space',
+    imageUrl: 'https://knoxt.space/wp-content/uploads/2021/06/knoxtlight.jpg',
+    language: 'en',
+    adapter: 'knox-t',
+    coverage: ['romance', 'fantasy', 'historical fiction', 'action', 'community-published'],
+    provenance: { repositoryUrl: universeRepositoryUrl, fileName: 'KnoxT', version: '1.0.0', checksum: '88581a8d74fa6637ff9c8947e04ad667638dc95db5573421d6a5e40183ca022e' },
+  },
+  {
+    id: 'genesis-studio',
+    name: 'Genesis Studio',
+    siteUrl: 'https://genesistudio.com',
+    imageUrl: 'https://genesistudio.com/favicon-32x32.png',
+    language: 'en',
+    adapter: 'genesis-studio',
+    coverage: ['fantasy', 'romance', 'action', 'sci-fi', 'community-published'],
+    provenance: { repositoryUrl: 'https://raw.githubusercontent.com/capthehacker99/ShosetLazyExtensions/master/', fileName: 'GenesisStudio', version: '1.1.0', checksum: 'd8a9dd1f163b3b413f6d899b85224f2a' },
+  },
+  {
+    id: 'questionable-questing',
+    name: 'Questionable Questing',
+    siteUrl: 'https://forum.questionablequesting.com',
+    imageUrl: 'https://shosetsuorg.gitlab.io/extensions/icons/QuestionableQuesting.png',
+    language: 'en',
+    adapter: 'questionable-questing',
+    coverage: ['fan fiction', 'fantasy', 'sci-fi', 'community-published'],
+    provenance: { repositoryUrl: universeRepositoryUrl, fileName: 'QuestionableQuesting', version: '1.1.1', checksum: 'd07aa275252027de55467151dc749708d762e2f76308807522159f86dbad26d6' },
+  },
+  {
+    id: 'light-novels-translations',
+    name: 'Light Novels Translations',
+    siteUrl: 'https://lightnovelstranslations.com',
+    imageUrl: 'https://github.com/noaione/shosetsu-extensions/raw/dev/icons/LightNovelsTranslations.png',
+    language: 'en',
+    adapter: 'light-novels-translations',
+    coverage: ['fantasy', 'romance', 'action', 'sci-fi', 'community-published'],
+    provenance: { repositoryUrl: 'https://raw.githubusercontent.com/noaione/shosetsu-extensions/master/', fileName: 'LightNovelsTranslations', version: '0.3.6', checksum: 'not-published' },
+  },
+  {
+    id: 'soafp-translations',
+    name: 'Soafp Translations',
+    siteUrl: 'https://soafp.com',
+    imageUrl: 'https://github.com/noaione/shosetsu-extensions/raw/dev/icons/Soafp.png',
+    language: 'en',
+    adapter: 'soafp-translations',
+    coverage: ['romance', 'drama', 'school life', 'fantasy', 'community-published'],
+    provenance: { repositoryUrl: 'https://raw.githubusercontent.com/noaione/shosetsu-extensions/master/', fileName: 'SoafpTranslations', version: '0.1.2', checksum: 'not-published' },
+  },
+  {
+    id: 'dragonholic',
+    name: 'Dragonholic',
+    siteUrl: 'https://dragonholictranslations.com',
+    imageUrl: 'https://dragonholic.com/wp-content/uploads/2024/09/cropped-favicon-32x32.png',
+    language: 'en',
+    adapter: 'dragonholic',
+    coverage: ['fantasy', 'romance', 'action', 'community-published'],
+    provenance: { repositoryUrl: 'https://raw.githubusercontent.com/capthehacker99/ShosetLazyExtensions/master/', fileName: 'Dragonholic', version: '1.0.1', checksum: 'b427efd75dd453f55896a19059b24f9e' },
+  },
+  {
+    id: 'wuxia-click',
+    name: 'WuxiaClick',
+    siteUrl: 'https://wuxia.click',
+    imageUrl: 'https://wuxia.click/favicon.ico',
+    language: 'en',
+    adapter: 'wuxia-click',
+    coverage: ['fantasy', 'romance', 'action', 'historical fiction', 'community-published'],
+    provenance: { repositoryUrl: 'https://raw.githubusercontent.com/capthehacker99/ShosetLazyExtensions/master/', fileName: 'WuxiaClick', version: '1.0.1', checksum: 'a014142acd1c05b89a237d322c0cdf8a' },
   },
 ];
 

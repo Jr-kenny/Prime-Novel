@@ -5,6 +5,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { UtilityRow } from '@/components/UtilityRow';
 import { AndroidMoreAction } from '@/components/android-more-action';
 import { useColors } from '@/hooks/useColors';
+import { currentAppVersion } from '@/utils/app-updates';
 
 export default function MoreScreen() {
   const colors = useColors();
@@ -21,6 +22,7 @@ export default function MoreScreen() {
           <UtilityRow compact icon="bar-chart-2" onPress={() => router.push('/analytics')} showChevron={false} testID="more-analytics" title="Analytics" />
           <UtilityRow compact icon="book-open" onPress={() => router.push('/reader-settings')} showChevron={false} testID="more-reader" title="Reader" />
           <UtilityRow compact icon="grid" onPress={() => router.push('/view-settings')} showChevron={false} testID="more-view" title="View" />
+          <UtilityRow compact description={`Prime Novel ${currentAppVersion()} · Check for updates`} icon="download-cloud" onPress={() => router.push('/app-update')} showChevron={false} testID="more-app-updates" title="App updates" />
           <UtilityRow compact icon="refresh-cw" onPress={() => router.push('/update-settings')} showChevron={false} testID="more-updates" title="Updates" />
           <UtilityRow compact icon="tool" onPress={() => router.push('/advanced')} showChevron={false} testID="more-advanced" title="Advanced" />
           <UtilityRow compact description="Tell us what to improve" icon="message-circle" onPress={() => router.push('/feedback')} showChevron={false} testID="more-feedback" title="Feedback & help" />

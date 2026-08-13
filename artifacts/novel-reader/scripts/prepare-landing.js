@@ -7,6 +7,7 @@ const landingTemplate = path.join(projectRoot, 'server', 'templates', 'landing-p
 const exportedIndex = path.join(distRoot, 'index.html');
 const appIndex = path.join(distRoot, 'app', 'index.html');
 const landingAssets = path.join(distRoot, 'landing-assets');
+const releaseManifest = path.join(projectRoot, 'assets', 'app-release.json');
 
 const assets = [
   'icon.png',
@@ -36,4 +37,5 @@ for (const asset of assets) {
 }
 
 fs.copyFileSync(landingTemplate, path.join(distRoot, 'index.html'));
+fs.copyFileSync(releaseManifest, path.join(distRoot, 'app-release.json'));
 console.log(`Prepared Prime Novel landing page and ${assets.length} landing assets.`);

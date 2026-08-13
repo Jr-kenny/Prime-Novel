@@ -61,6 +61,7 @@ function RootLayoutNav() {
         <Stack.Screen name="analytics" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="reader-settings" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="view-settings" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
+        <Stack.Screen name="app-update" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="update-settings" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="advanced" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />
         <Stack.Screen name="feedback" options={{ animation: 'slide_from_right', gestureEnabled: true, headerShown: false }} />

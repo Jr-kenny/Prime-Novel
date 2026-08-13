@@ -93,7 +93,7 @@ export default function DiscoverScreen() {
               <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Results</Text>
             </View>
             {searchError ? <Text style={[styles.sectionCopy, { color: colors.mutedForeground }]}>{searchError}</Text> : null}
-            {searching ? <SearchResultsSkeleton /> : (
+            {searching && results.length === 0 ? <SearchResultsSkeleton /> : (
               <View style={styles.resultsList}>
                 {results.map((novel) => {
                   return (
@@ -108,6 +108,7 @@ export default function DiscoverScreen() {
                     </Pressable>
                   );
                 })}
+                {searching ? <Text style={[styles.searchingMore, { color: colors.mutedForeground }]}>Searching more sources</Text> : null}
                 {!searching && results.length === 0 && !searchError ? <Text style={[styles.empty, { color: colors.mutedForeground }]}>No novels found.</Text> : null}
               </View>
             )}
@@ -178,6 +179,7 @@ const styles = StyleSheet.create({
   sectionMeta: { fontFamily: 'Inter_400Regular', fontSize: 12 },
   sectionCopy: { fontFamily: 'Inter_400Regular', fontSize: 12, paddingHorizontal: 22, marginTop: 5 },
   resultsList: { marginTop: 8 },
+  searchingMore: { fontFamily: 'Inter_400Regular', fontSize: 11, paddingHorizontal: 22, paddingVertical: 14 },
   resultRow: { minHeight: 100, paddingHorizontal: 22, paddingVertical: 9, flexDirection: 'row', alignItems: 'center', gap: 13, borderBottomWidth: StyleSheet.hairlineWidth },
   resultCopy: { flex: 1, gap: 5 },
   resultTitle: { fontFamily: 'Georgia', fontSize: 16, lineHeight: 20 },
