@@ -3,6 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AppState } from 'react-native';
 import { durableStorageWrite } from '@/utils/durable-storage';
 import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
+import { loadReaderDatabaseState, persistReaderDatabaseState } from '@/utils/persistent-database';
 
 export type BookStatus = 'New chapters' | 'Continue' | 'On hold' | 'Plan to read' | 'Completed';
 export type ReaderTheme = 'paper' | 'soft-dark' | 'black' | 'white';
@@ -220,6 +221,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   const lastPersistentBackupAtRef = useRef(0);
 
   const commitSnapshot = useCallback(async (snapshot: StorageSnapshot) => {
+    persistReaderDatabaseState(snapshot);
     await durableStorageWrite(() => AsyncStorage.multiSet([
       ['novel-books', JSON.stringify(snapshot.books)],
       ['novel-active', snapshot.activeId],
@@ -247,24 +249,25 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       readerBackupStorageKey,
     ])
       .then(async (entries) => {
+        const databaseSnapshot = loadReaderDatabaseState<StorageSnapshot>();
         const storedPositions = readJson<Record<string, ReadingPosition>>(entries[5][1], {});
         const primaryBooks = parseStoredBooks(entries[0][1]);
         const asyncBackup = parseStoredSnapshot(entries[6][1]);
-        const fileBackup = primaryBooks === undefined || entries[0][1] === null ? await readPersistentBackup<StorageSnapshot>('reader-state') : undefined;
+        const fileBackup = primaryBooks === undefined || primaryBooks.length === 0 ? await readPersistentBackup<StorageSnapshot>('reader-state') : undefined;
         const availableBackup = asyncBackup ?? fileBackup;
-        const recoveredSnapshot = primaryBooks === undefined || (entries[0][1] === null && availableBackup?.books.length)
+        const recoveredSnapshot = primaryBooks === undefined || (primaryBooks.length === 0 && availableBackup?.books.length)
           ? availableBackup
           : undefined;
-        if (primaryBooks === undefined && !recoveredSnapshot) throw new Error('Stored reader data could not be read safely.');
-        const effectivePositions = recoveredSnapshot?.positions ?? storedPositions;
-        const storedBooks = normalizeBooks(recoveredSnapshot?.books ?? primaryBooks ?? []).map((book) => {
+        if (primaryBooks === undefined && !recoveredSnapshot && !databaseSnapshot) throw new Error('Stored reader data could not be read safely.');
+        const effectivePositions = databaseSnapshot?.positions ?? recoveredSnapshot?.positions ?? storedPositions;
+        const storedBooks = normalizeBooks(databaseSnapshot?.books ?? recoveredSnapshot?.books ?? primaryBooks ?? []).map((book) => {
           const latestPosition = effectivePositions[book.id];
           const latestChapter = latestPosition?.chapter;
           return Number.isInteger(latestChapter) && latestChapter >= 1 && latestChapter <= book.totalChapters
             ? { ...book, chapter: latestChapter }
             : book;
         });
-        const requestedActive = entries[1][1] ?? recoveredSnapshot?.activeId ?? initialSnapshot.activeId;
+        const requestedActive = databaseSnapshot?.activeId ?? entries[1][1] ?? recoveredSnapshot?.activeId ?? initialSnapshot.activeId;
         const storedActive = storedBooks.some((book) => book.id === requestedActive) ? requestedActive : storedBooks[0]?.id ?? '';
         const storedTheme = readJson<ReaderTheme | null>(entries[2][1], null);
         const storedPreferences = readJson<Partial<ReaderPreferences> | null>(entries[3][1], null);
@@ -289,11 +292,12 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         const nextSnapshot: StorageSnapshot = {
           books: storedBooks,
           activeId: storedActive,
-          preferences: recoveredSnapshot?.preferences && primaryBooks === undefined ? recoveredSnapshot.preferences : nextPreferences,
-          bookmarks: recoveredSnapshot?.bookmarks && primaryBooks === undefined ? recoveredSnapshot.bookmarks : storedBookmarks,
-          positions: recoveredSnapshot?.positions && primaryBooks === undefined ? recoveredSnapshot.positions : storedPositions,
+          preferences: databaseSnapshot?.preferences ?? (recoveredSnapshot?.preferences && primaryBooks === undefined ? recoveredSnapshot.preferences : nextPreferences),
+          bookmarks: databaseSnapshot?.bookmarks ?? (recoveredSnapshot?.bookmarks && primaryBooks === undefined ? recoveredSnapshot.bookmarks : storedBookmarks),
+          positions: databaseSnapshot?.positions ?? (recoveredSnapshot?.positions && primaryBooks === undefined ? recoveredSnapshot.positions : storedPositions),
         };
 
+        persistReaderDatabaseState(nextSnapshot);
         snapshotRef.current = nextSnapshot;
         hydratedRef.current = true;
         setBooks(storedBooks);
@@ -320,6 +324,7 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     if (!hydratedRef.current) return;
     const nextSnapshot = { ...snapshotRef.current, ...changes };
     snapshotRef.current = nextSnapshot;
+    persistReaderDatabaseState(nextSnapshot);
     storageWriteRef.current = storageWriteRef.current
       .catch(() => {})
       .then(() => commitSnapshot(nextSnapshot));

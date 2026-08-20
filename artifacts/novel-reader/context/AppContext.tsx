@@ -7,6 +7,7 @@ import { downloadSourcePackage } from '@/utils/source-download';
 import { PRIME_SOURCE_REGISTRY } from '@/data/prime-sources';
 import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
 import { durableStorageWrite } from '@/utils/durable-storage';
+import { loadAppDatabaseState, persistAppDatabaseState } from '@/utils/persistent-database';
 
 export type LibraryLayout = 'shelf' | 'grid';
 export type UpdateFrequency = 'off' | 'hourly' | 'daily';
@@ -230,6 +231,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const lastPersistentBackupAtRef = useRef(0);
 
   const commitSnapshot = useCallback(async (snapshot: AppSnapshot) => {
+    persistAppDatabaseState(snapshot);
     await durableStorageWrite(() => AsyncStorage.multiSet([
       ['prime-settings', JSON.stringify(snapshot.settings)],
       ['prime-sources', JSON.stringify(snapshot.sources)],
@@ -250,12 +252,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     AsyncStorage.multiGet(['prime-settings', 'prime-sources', 'prime-repositories', 'prime-available-sources', 'prime-shared-links', 'prime-history', 'prime-recent-searches', 'prime-reading-sessions', appBackupStorageKey])
       .then(async (entries) => {
+        const databaseSnapshot = loadAppDatabaseState<AppSnapshot>();
         const primaryEntries = entries.slice(0, 8);
         const asyncBackup = parseAppSnapshot(entries[8][1]);
-        const fileBackup = hasInvalidJson(primaryEntries) ? await readPersistentBackup<AppSnapshot>('app-state') : undefined;
+        const primaryHistory = parseJson<HistoryEntry[]>(entries[5][1], []);
+        const fileBackup = hasInvalidJson(primaryEntries) || primaryHistory.length === 0 ? await readPersistentBackup<AppSnapshot>('app-state') : undefined;
         const recovered = hasInvalidJson(primaryEntries) ? asyncBackup ?? fileBackup : undefined;
-        if (hasInvalidJson(primaryEntries) && !recovered) throw new Error('Stored app data could not be read safely.');
-        const nextSnapshot: AppSnapshot = recovered ?? {
+        if (hasInvalidJson(primaryEntries) && !recovered && !databaseSnapshot) throw new Error('Stored app data could not be read safely.');
+        const legacySnapshot: AppSnapshot = recovered ?? {
           settings: normalizeSettings(parseJson<Partial<AppSettings>>(entries[0][1], {})),
           sources: normalizeSources(parseJson<SourceRecord[]>(entries[1][1], defaultSources)),
           repositories: parseJson<RepositoryRecord[]>(entries[2][1], defaultRepositories),
@@ -265,6 +269,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           recentSearches: parseJson<string[]>(entries[6][1], []),
           readingSessions: parseJson<ReadingSession[]>(entries[7][1], []),
         };
+        const backupSnapshot = asyncBackup ?? fileBackup;
+        const nextSnapshot: AppSnapshot = databaseSnapshot ?? {
+          ...legacySnapshot,
+          history: legacySnapshot.history.length > 0 ? legacySnapshot.history : backupSnapshot?.history ?? [],
+          readingSessions: legacySnapshot.readingSessions.length > 0 ? legacySnapshot.readingSessions : backupSnapshot?.readingSessions ?? [],
+        };
+        persistAppDatabaseState(nextSnapshot);
         snapshotRef.current = nextSnapshot;
         hydratedRef.current = true;
         setSettings(nextSnapshot.settings);
@@ -292,6 +303,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!hydratedRef.current) return;
     const nextSnapshot = { ...snapshotRef.current, ...next };
     snapshotRef.current = nextSnapshot;
+    persistAppDatabaseState(nextSnapshot);
     storageWriteRef.current = storageWriteRef.current
       .catch(() => {})
       .then(() => commitSnapshot(nextSnapshot));

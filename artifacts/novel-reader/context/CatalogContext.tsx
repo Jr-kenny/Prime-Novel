@@ -19,6 +19,12 @@ import { loadPrimeChapterOnWeb, loadPrimeNovelOnWeb, searchPrimeSourcesOnWebIncr
 import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
 import { rankTitleSearchResults } from '@/utils/search-ranking';
 import { durableStorageWrite } from '@/utils/durable-storage';
+import {
+  deleteDownloadDatabaseRecord,
+  loadDownloadDatabaseRecords,
+  persistDownloadDatabaseRecords,
+  upsertDownloadDatabaseRecord,
+} from '@/utils/persistent-database';
 
 export type DownloadedChapter = {
   key: string;
@@ -139,6 +145,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   const searchRequestRef = useRef(0);
 
   const commitDownloads = useCallback(async (metadata: DownloadedChapter[]) => {
+    persistDownloadDatabaseRecords(metadata);
     await durableStorageWrite(() => AsyncStorage.setItem(downloadsStorageKey, JSON.stringify(metadata)));
     if (metadata.length === 0) return;
     void AsyncStorage.setItem(downloadsBackupStorageKey, JSON.stringify(metadata)).catch(() => {});
@@ -151,18 +158,24 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     downloadsHydrationRef.current = AsyncStorage.multiGet([downloadsStorageKey, legacyDownloadsStorageKey, downloadsBackupStorageKey])
       .then(async (entries) => {
+        const databaseDownloads = loadDownloadDatabaseRecords<DownloadedChapter>();
         const indexed = parseDownloads(entries[0][1]);
         const legacy = parseDownloads(entries[1][1]);
         const asyncBackup = parseDownloads(entries[2][1]);
-        const fileBackup = indexed === undefined ? await readPersistentBackup<DownloadedChapter[]>('download-index') : undefined;
-        const stored = indexed === undefined
+        const fileBackup = indexed === undefined || indexed.length === 0 ? await readPersistentBackup<DownloadedChapter[]>('download-index') : undefined;
+        const stored = databaseDownloads ?? (indexed === undefined
           ? legacy ?? asyncBackup ?? fileBackup
           : indexed.length === 0 && legacy?.length
             ? legacy
-            : indexed;
+            : indexed.length === 0 && asyncBackup?.length
+              ? asyncBackup
+              : indexed.length === 0 && fileBackup?.length
+                ? fileBackup
+            : indexed);
         if (!stored) throw new Error('Stored downloads could not be read safely.');
         downloadsRef.current = stored;
         setDownloads(stored.map(downloadMetadata));
+        persistDownloadDatabaseRecords(stored.map(downloadMetadata));
 
         if (legacy?.length) {
           await Promise.all(legacy.map(async (download) => {
@@ -197,6 +210,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     const metadata = next.map(downloadMetadata);
     downloadsRef.current = metadata;
     setDownloads(metadata);
+    persistDownloadDatabaseRecords(metadata);
     downloadsWriteRef.current = downloadsWriteRef.current
       .catch(() => {})
       .then(() => commitDownloads(metadata));
@@ -288,7 +302,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     return Platform.OS === 'web' ? loadPrimeChapterOnWeb(chapter, sourceId) : loadPrimeChapter(source, chapter);
   }, [persistDownloads]);
 
-  const downloadChapter = useCallback(async (novel: PrimeNovel, chapter: PrimeChapter) => {
+  const saveDownloadedChapter = useCallback(async (novel: PrimeNovel, chapter: PrimeChapter, persistLegacyIndex: boolean) => {
     await downloadsHydrationRef.current;
     const key = chapterCacheKey(novel.sourceId, chapter.id);
     const existing = downloadsRef.current.find((download) => download.key === key);
@@ -312,9 +326,21 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     };
     await writeChapterContent(key, content);
     const concurrentlyStored = downloadsRef.current.find((item) => item.key === key);
-    if (!concurrentlyStored) await persistDownloads([download, ...downloadsRef.current]);
+    if (!concurrentlyStored) {
+      const metadata = downloadMetadata(download);
+      upsertDownloadDatabaseRecord(metadata);
+      const next = [metadata, ...downloadsRef.current];
+      downloadsRef.current = next;
+      setDownloads(next);
+      if (persistLegacyIndex) await commitDownloads(next);
+    }
     return download;
-  }, [getChapter, persistDownloads]);
+  }, [commitDownloads, getChapter, persistDownloads]);
+
+  const downloadChapter = useCallback(
+    (novel: PrimeNovel, chapter: PrimeChapter) => saveDownloadedChapter(novel, chapter, true),
+    [saveDownloadedChapter],
+  );
 
   const downloadAllChapters = useCallback(async (
     novel: PrimeNovel,
@@ -339,7 +365,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
         if (chapterIndex >= chapters.length) return;
 
         try {
-          await downloadChapter(novel, chapters[chapterIndex]);
+          await saveDownloadedChapter(novel, chapters[chapterIndex], false);
           downloaded += 1;
         } catch {
           failed += 1;
@@ -349,10 +375,12 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     };
 
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    await commitDownloads(downloadsRef.current.map(downloadMetadata));
     return { downloaded, failed, total: chapters.length };
-  }, [downloadChapter, settings.downloadConcurrency]);
+  }, [commitDownloads, saveDownloadedChapter, settings.downloadConcurrency]);
 
   const removeDownload = useCallback((key: string) => {
+    deleteDownloadDatabaseRecord(key);
     void persistDownloads(downloadsRef.current.filter((download) => download.key !== key))
       .then(() => deleteChapterContent(key))
       .catch(() => {});
