@@ -17,6 +17,7 @@ import {
 } from '@/utils/prime-source-adapters';
 import { loadPrimeChapterOnWeb, loadPrimeNovelOnWeb, searchPrimeSourcesOnWebIncremental } from '@/utils/catalog-web-api';
 import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
+import { rankTitleSearchResults } from '@/utils/search-ranking';
 
 export type DownloadedChapter = {
   key: string;
@@ -121,33 +122,6 @@ async function deleteChapterContent(key: string) {
   await AsyncStorage.removeItem(`${downloadContentStoragePrefix}${key}`);
 }
 
-function normalizeSearchText(value: string) {
-  return value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
-}
-
-function searchRank(novel: PrimeNovel, normalizedQuery: string) {
-  const title = normalizeSearchText(novel.title);
-  const words = title.split(' ');
-  if (title === normalizedQuery) return 0;
-  if (title.startsWith(`${normalizedQuery} `) || title.startsWith(normalizedQuery)) return 1;
-  if (words.some((word) => word.startsWith(normalizedQuery))) return 2;
-  if (title.includes(normalizedQuery)) return 3;
-  return 4;
-}
-
-function rankSearchResults(novels: PrimeNovel[], query: string) {
-  const normalizedQuery = normalizeSearchText(query);
-  return novels
-    .map((novel, index) => ({ novel, index, rank: searchRank(novel, normalizedQuery) }))
-    .sort((left, right) => {
-      if (left.rank !== right.rank) return left.rank - right.rank;
-      const titleLength = left.novel.title.length - right.novel.title.length;
-      if (titleLength !== 0) return titleLength;
-      return left.index - right.index;
-    })
-    .map(({ novel }) => novel);
-}
-
 export function CatalogProvider({ children }: { children: React.ReactNode }) {
   const { settings, sources } = useApp();
   const [results, setResults] = useState<PrimeNovel[]>([]);
@@ -250,7 +224,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
           incrementalResults.set(partialResult.source.id, partialResult);
           const visibleResults = Array.from(incrementalResults.values());
           setSourceResults(visibleResults);
-          setResults(rankSearchResults(flattenSearchResults(visibleResults), trimmedQuery));
+          setResults(rankTitleSearchResults(flattenSearchResults(visibleResults), trimmedQuery));
         });
       } else {
         const incrementalResults = new Map<string, PrimeSourceSearchResult>();
@@ -259,12 +233,12 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
           incrementalResults.set(partialResult.source.id, partialResult);
           const visibleResults = Array.from(incrementalResults.values());
           setSourceResults(visibleResults);
-          setResults(rankSearchResults(flattenSearchResults(visibleResults), trimmedQuery));
+          setResults(rankTitleSearchResults(flattenSearchResults(visibleResults), trimmedQuery));
         });
       }
       if (requestId !== searchRequestRef.current) return;
       setSourceResults(nextSourceResults);
-      setResults(rankSearchResults(flattenSearchResults(nextSourceResults), trimmedQuery));
+      setResults(rankTitleSearchResults(flattenSearchResults(nextSourceResults), trimmedQuery));
       if (nextSourceResults.every((result) => result.error)) setSearchError('The enabled sources could not be reached.');
     } catch {
       if (requestId === searchRequestRef.current) setSearchError('Search could not be completed.');
