@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SubscreenHeader } from '@/components/SubscreenHeader';
 import { useColors } from '@/hooks/useColors';
 import { compareAppVersions, currentAppVersion, fetchAppRelease, platformRelease, releaseUrl, type AppRelease } from '@/utils/app-updates';
+import { createPreUpdateBackup } from '@/utils/data-recovery';
 
 type UpdateState = 'idle' | 'checking' | 'current' | 'available' | 'error';
 
@@ -60,6 +61,7 @@ export default function AppUpdateScreen() {
     setState('checking');
     setMessage('Downloading the update');
     try {
+      await createPreUpdateBackup();
       const directory = `${FileSystem.documentDirectory}prime-novel/updates/`;
       await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
       const destination = `${directory}Prime-Novel-${release.version}.apk`;

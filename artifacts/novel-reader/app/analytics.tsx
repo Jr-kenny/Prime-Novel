@@ -1,6 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BookCover } from '@/components/BookCover';
 import { SubscreenHeader } from '@/components/SubscreenHeader';
@@ -27,8 +27,8 @@ function StatCell({ label, value }: { label: string; value: string }) {
 export default function AnalyticsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { books } = useReader();
-  const { readingSessions } = useApp();
+  const { books, hydrated: readerHydrated } = useReader();
+  const { readingSessions, hydrated: appHydrated } = useApp();
 
   const analytics = useMemo(() => {
     const totalReadingTime = readingSessions.reduce((sum, session) => sum + session.durationMs, 0);
@@ -59,7 +59,12 @@ export default function AnalyticsScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <SubscreenHeader title="Analytics" />
-      <ScrollView
+      {!readerHydrated || !appHydrated ? (
+        <View style={styles.loading}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.mutedForeground }]}>Loading saved analytics</Text>
+        </View>
+      ) : <ScrollView
         contentContainerStyle={{ paddingHorizontal: 22, paddingBottom: insets.bottom + 48 }}
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
@@ -110,13 +115,15 @@ export default function AnalyticsScreen() {
             </View>
           ))}
         </View>
-      </ScrollView>
+      </ScrollView>}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  loadingText: { fontFamily: 'Inter_500Medium', fontSize: 13 },
   sectionTitle: { fontFamily: 'Georgia', fontSize: 20, marginTop: 26, marginBottom: 10 },
   stats: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: StyleSheet.hairlineWidth },
   statCell: { width: '50%', paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },

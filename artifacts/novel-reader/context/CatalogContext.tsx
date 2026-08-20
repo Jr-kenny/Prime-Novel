@@ -16,6 +16,7 @@ import {
   type PrimeSourceSearchResult,
 } from '@/utils/prime-source-adapters';
 import { loadPrimeChapterOnWeb, loadPrimeNovelOnWeb, searchPrimeSourcesOnWebIncremental } from '@/utils/catalog-web-api';
+import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
 
 export type DownloadedChapter = {
   key: string;
@@ -50,6 +51,7 @@ type CatalogContextValue = {
 
 const legacyDownloadsStorageKey = 'prime-chapter-cache';
 const downloadsStorageKey = 'prime-chapter-index-v2';
+const downloadsBackupStorageKey = 'prime-chapter-index-backup-v2';
 const downloadContentStoragePrefix = 'prime-chapter-content:';
 const downloadDirectory = FileSystem.documentDirectory ? `${FileSystem.documentDirectory}prime-novel/chapters/` : undefined;
 const CatalogContext = createContext<CatalogContextValue | null>(null);
@@ -74,6 +76,18 @@ function downloadMetadata(download: DownloadedChapter): DownloadedChapter {
   return metadata;
 }
 
+function parseDownloads(value: string | null): DownloadedChapter[] | undefined {
+  if (value === null) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return undefined;
+    if (!parsed.every((download) => download && typeof download === 'object' && typeof (download as DownloadedChapter).key === 'string')) return undefined;
+    return parsed as DownloadedChapter[];
+  } catch {
+    return undefined;
+  }
+}
+
 async function writeChapterContent(key: string, content: PrimeChapterContent) {
   const value = JSON.stringify(content);
   if (Platform.OS !== 'web' && downloadDirectory) {
@@ -90,6 +104,13 @@ async function readChapterContent(key: string) {
     : await AsyncStorage.getItem(`${downloadContentStoragePrefix}${key}`);
   if (!value) throw new Error('The offline chapter file is missing.');
   return JSON.parse(value) as PrimeChapterContent;
+}
+
+async function chapterContentExists(key: string) {
+  if (Platform.OS !== 'web' && downloadDirectory) {
+    return (await FileSystem.getInfoAsync(`${downloadDirectory}${cacheFileName(key)}`)).exists;
+  }
+  return (await AsyncStorage.getItem(`${downloadContentStoragePrefix}${key}`)) !== null;
 }
 
 async function deleteChapterContent(key: string) {
@@ -142,32 +163,42 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   const searchRequestRef = useRef(0);
 
   useEffect(() => {
-    downloadsHydrationRef.current = AsyncStorage.multiGet([downloadsStorageKey, legacyDownloadsStorageKey])
+    downloadsHydrationRef.current = AsyncStorage.multiGet([downloadsStorageKey, legacyDownloadsStorageKey, downloadsBackupStorageKey])
       .then(async (entries) => {
-        const indexed = entries[0][1];
-        const legacy = entries[1][1];
-        const stored = indexed
-          ? JSON.parse(indexed) as DownloadedChapter[]
-          : legacy
-            ? JSON.parse(legacy) as DownloadedChapter[]
-            : [];
+        const indexed = parseDownloads(entries[0][1]);
+        const legacy = parseDownloads(entries[1][1]);
+        const asyncBackup = parseDownloads(entries[2][1]);
+        const fileBackup = indexed === undefined ? await readPersistentBackup<DownloadedChapter[]>('download-index') : undefined;
+        const stored = indexed === undefined
+          ? legacy ?? asyncBackup ?? fileBackup
+          : indexed.length === 0 && legacy?.length
+            ? legacy
+            : indexed;
+        if (!stored) throw new Error('Stored downloads could not be read safely.');
         downloadsRef.current = stored;
         setDownloads(stored.map(downloadMetadata));
 
-        if (!indexed && legacy && stored.length > 0) {
-          await Promise.all(stored.map(async (download) => {
-            if (download.content) await writeChapterContent(download.key, download.content);
-          }));
-          await AsyncStorage.setItem(downloadsStorageKey, JSON.stringify(stored.map(downloadMetadata)));
-          await AsyncStorage.removeItem(legacyDownloadsStorageKey);
+        if (legacy?.length) {
+          await Promise.all(legacy.map(async (download) => {
+            if (download.content && !await chapterContentExists(download.key)) await writeChapterContent(download.key, download.content);
+          }).map((migration) => migration.catch(() => {
+            // Keep the legacy entry available when one chapter file cannot be migrated.
+          })));
+        }
+        if (legacy && stored === legacy && stored.length > 0) {
+          await AsyncStorage.setItem(downloadsStorageKey, JSON.stringify(stored.map(downloadMetadata))).catch(() => {});
           downloadsRef.current = stored.map(downloadMetadata);
         }
+        if (stored.length > 0) {
+          const metadata = stored.map(downloadMetadata);
+          await Promise.all([
+            AsyncStorage.setItem(downloadsBackupStorageKey, JSON.stringify(metadata)),
+            writePersistentBackup('download-index', metadata),
+          ]).catch(() => {});
+        }
       })
-      .catch(() => {
-        downloadsRef.current = [];
-        setDownloads([]);
-      })
-      .finally(() => setDownloadsHydrated(true));
+      .then(() => setDownloadsHydrated(true))
+      .catch(() => setDownloadsHydrated(false));
   }, []);
 
   const persistDownloads = useCallback(async (next: DownloadedChapter[]) => {
@@ -180,7 +211,12 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
       .catch(() => {})
       .then(async () => {
         if (revision !== downloadsWriteRevisionRef.current) return;
-        await AsyncStorage.setItem(downloadsStorageKey, JSON.stringify(downloadsRef.current.map(downloadMetadata)));
+        const currentMetadata = downloadsRef.current.map(downloadMetadata);
+        if (currentMetadata.length > 0) {
+          await AsyncStorage.setItem(downloadsBackupStorageKey, JSON.stringify(currentMetadata));
+        }
+        await AsyncStorage.setItem(downloadsStorageKey, JSON.stringify(currentMetadata));
+        if (currentMetadata.length > 0) await writePersistentBackup('download-index', currentMetadata);
       });
     await downloadsWriteRef.current;
   }, []);

@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import Animated, { FadeInRight } from 'react-native-reanimated';
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BookCover } from '@/components/BookCover';
 import { ShelfGridCard } from '@/components/shelf-grid-card';
@@ -19,13 +19,25 @@ export default function ReadingScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { books, activeBook, setActiveBook } = useReader();
+  const { books, activeBook, hydrated, setActiveBook } = useReader();
   const { priorityBooks, otherBooks } = splitShelfBooks(books);
   const gridCardWidth = Math.max(120, Math.floor((width - 44 - 14) / 2));
   const openChapters = (bookId: string) => {
     setActiveBook(bookId);
     router.push('/chapters');
   };
+
+  if (!hydrated) {
+    return (
+      <View style={[styles.screen, { backgroundColor: colors.background }]}>
+        <ScreenHeader eyebrow="Your quiet shelf" title="Reading" action="settings" />
+        <View style={styles.emptyState}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={[styles.emptyCopy, { color: colors.mutedForeground }]}>Loading your saved library</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (!activeBook) {
     return (

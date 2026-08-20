@@ -4,6 +4,7 @@ import type { RepositoryPackage, RepositoryPackageType } from '@/utils/repositor
 import { fetchRepositoryPackages } from '@/utils/repository-sync';
 import { downloadSourcePackage } from '@/utils/source-download';
 import { PRIME_SOURCE_REGISTRY } from '@/data/prime-sources';
+import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
 
 export type LibraryLayout = 'shelf' | 'grid';
 export type UpdateFrequency = 'off' | 'hourly' | 'daily';
@@ -139,6 +140,8 @@ const initialSnapshot: AppSnapshot = {
   readingSessions: [],
 };
 
+const appBackupStorageKey = 'prime-app-backup-v1';
+
 const AppContext = createContext<AppContextValue | null>(null);
 
 function parseJson<T>(value: string | null, fallback: T): T {
@@ -148,6 +151,29 @@ function parseJson<T>(value: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function parseAppSnapshot(value: string | null): AppSnapshot | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Partial<AppSnapshot>;
+    if (!parsed.settings || !Array.isArray(parsed.sources) || !Array.isArray(parsed.repositories) || !Array.isArray(parsed.availableSources) || !Array.isArray(parsed.sharedLinks) || !Array.isArray(parsed.history) || !Array.isArray(parsed.recentSearches) || !Array.isArray(parsed.readingSessions)) return undefined;
+    return parsed as AppSnapshot;
+  } catch {
+    return undefined;
+  }
+}
+
+function hasInvalidJson(entries: Array<[string, string | null]>) {
+  return entries.some(([, value]) => {
+    if (value === null) return false;
+    try {
+      JSON.parse(value);
+      return false;
+    } catch {
+      return true;
+    }
+  });
 }
 
 function normalizeSettings(stored: Partial<AppSettings>) {
@@ -195,23 +221,55 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const launchSyncStarted = useRef(false);
   const storageWriteRef = useRef<Promise<void>>(Promise.resolve());
+  const snapshotRef = useRef<AppSnapshot>(initialSnapshot);
+  const hydratedRef = useRef(false);
+  const lastPersistentBackupAtRef = useRef(0);
 
   useEffect(() => {
-    AsyncStorage.multiGet(['prime-settings', 'prime-sources', 'prime-repositories', 'prime-available-sources', 'prime-shared-links', 'prime-history', 'prime-recent-searches', 'prime-reading-sessions'])
-      .then((entries) => {
-        setSettings(normalizeSettings(parseJson<Partial<AppSettings>>(entries[0][1], {})));
-        setSources(normalizeSources(parseJson<SourceRecord[]>(entries[1][1], defaultSources)));
-        setRepositories(parseJson<RepositoryRecord[]>(entries[2][1], defaultRepositories));
-        setAvailableSources(parseJson<AvailableSource[]>(entries[3][1], []));
-        setSharedLinks(parseJson<string[]>(entries[4][1], []));
-        setHistory(parseJson<HistoryEntry[]>(entries[5][1], []));
-        setRecentSearches(parseJson<string[]>(entries[6][1], []));
-        setReadingSessions(parseJson<ReadingSession[]>(entries[7][1], []));
+    AsyncStorage.multiGet(['prime-settings', 'prime-sources', 'prime-repositories', 'prime-available-sources', 'prime-shared-links', 'prime-history', 'prime-recent-searches', 'prime-reading-sessions', appBackupStorageKey])
+      .then(async (entries) => {
+        const primaryEntries = entries.slice(0, 8);
+        const asyncBackup = parseAppSnapshot(entries[8][1]);
+        const fileBackup = hasInvalidJson(primaryEntries) ? await readPersistentBackup<AppSnapshot>('app-state') : undefined;
+        const recovered = hasInvalidJson(primaryEntries) ? asyncBackup ?? fileBackup : undefined;
+        if (hasInvalidJson(primaryEntries) && !recovered) throw new Error('Stored app data could not be read safely.');
+        const nextSnapshot: AppSnapshot = recovered ?? {
+          settings: normalizeSettings(parseJson<Partial<AppSettings>>(entries[0][1], {})),
+          sources: normalizeSources(parseJson<SourceRecord[]>(entries[1][1], defaultSources)),
+          repositories: parseJson<RepositoryRecord[]>(entries[2][1], defaultRepositories),
+          availableSources: parseJson<AvailableSource[]>(entries[3][1], []),
+          sharedLinks: parseJson<string[]>(entries[4][1], []),
+          history: parseJson<HistoryEntry[]>(entries[5][1], []),
+          recentSearches: parseJson<string[]>(entries[6][1], []),
+          readingSessions: parseJson<ReadingSession[]>(entries[7][1], []),
+        };
+        snapshotRef.current = nextSnapshot;
+        hydratedRef.current = true;
+        setSettings(nextSnapshot.settings);
+        setSources(nextSnapshot.sources);
+        setRepositories(nextSnapshot.repositories);
+        setAvailableSources(nextSnapshot.availableSources);
+        setSharedLinks(nextSnapshot.sharedLinks);
+        setHistory(nextSnapshot.history);
+        setRecentSearches(nextSnapshot.recentSearches);
+        setReadingSessions(nextSnapshot.readingSessions);
+        await Promise.all([
+          AsyncStorage.setItem(appBackupStorageKey, JSON.stringify(nextSnapshot)),
+          writePersistentBackup('app-state', nextSnapshot),
+        ]).then(() => {
+          lastPersistentBackupAtRef.current = Date.now();
+        }).catch(() => {});
       })
-      .finally(() => setHydrated(true));
+      .then(() => setHydrated(true))
+      .catch(() => {
+        hydratedRef.current = false;
+      });
   }, []);
 
   const persist = useCallback((next: Partial<AppSnapshot>) => {
+    if (!hydratedRef.current) return;
+    const nextSnapshot = { ...snapshotRef.current, ...next };
+    snapshotRef.current = nextSnapshot;
     const entries: Array<[string, string]> = [];
     if (next.settings) entries.push(['prime-settings', JSON.stringify(next.settings)]);
     if (next.sources) entries.push(['prime-sources', JSON.stringify(next.sources)]);
@@ -224,7 +282,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (entries.length === 0) return;
     storageWriteRef.current = storageWriteRef.current
       .catch(() => {})
-      .then(() => AsyncStorage.multiSet(entries));
+      .then(async () => {
+        await AsyncStorage.setItem(appBackupStorageKey, JSON.stringify(nextSnapshot));
+        await AsyncStorage.multiSet(entries);
+        if (Date.now() - lastPersistentBackupAtRef.current >= 15_000) {
+          await writePersistentBackup('app-state', nextSnapshot);
+          lastPersistentBackupAtRef.current = Date.now();
+        }
+      });
   }, []);
 
   const setSetting = useCallback(<Key extends keyof AppSettings>(key: Key, value: AppSettings[Key]) => {

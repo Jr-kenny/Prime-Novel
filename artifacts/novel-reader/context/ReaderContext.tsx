@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
 
 export type BookStatus = 'New chapters' | 'Continue' | 'On hold' | 'Plan to read' | 'Completed';
 export type ReaderTheme = 'paper' | 'soft-dark' | 'black' | 'white';
@@ -113,6 +114,31 @@ const initialSnapshot: StorageSnapshot = {
   positions: {},
 };
 
+const readerBackupStorageKey = 'prime-reader-backup-v1';
+
+function parseStoredBooks(value: string | null): Book[] | undefined {
+  if (value === null) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return undefined;
+    if (!parsed.every((book) => book && typeof book === 'object' && typeof (book as Book).id === 'string')) return undefined;
+    return parsed as Book[];
+  } catch {
+    return undefined;
+  }
+}
+
+function parseStoredSnapshot(value: string | null): StorageSnapshot | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Partial<StorageSnapshot>;
+    if (!Array.isArray(parsed.books) || typeof parsed.activeId !== 'string' || !parsed.preferences || !parsed.bookmarks || !parsed.positions) return undefined;
+    return parsed as StorageSnapshot;
+  } catch {
+    return undefined;
+  }
+}
+
 function normalizeBookmarks(value: Record<string, number[]> | number[] | null, activeId: string) {
   if (Array.isArray(value)) {
     return activeId && value.length > 0 ? { [activeId]: Array.from(new Set(value.filter((chapter) => Number.isInteger(chapter)))) } : {};
@@ -189,6 +215,8 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   const snapshotRef = useRef<StorageSnapshot>(initialSnapshot);
   const storageWriteRef = useRef<Promise<void>>(Promise.resolve());
   const storageWriteRevisionRef = useRef(0);
+  const hydratedRef = useRef(false);
+  const lastPersistentBackupAtRef = useRef(0);
 
   useEffect(() => {
     AsyncStorage.multiGet([
@@ -198,17 +226,27 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       'novel-preferences',
       'novel-bookmarks',
       'novel-positions',
+      readerBackupStorageKey,
     ])
-      .then((entries) => {
+      .then(async (entries) => {
         const storedPositions = readJson<Record<string, ReadingPosition>>(entries[5][1], {});
-        const storedBooks = normalizeBooks(readJson<Book[]>(entries[0][1], [])).map((book) => {
-          const latestPosition = storedPositions[book.id];
+        const primaryBooks = parseStoredBooks(entries[0][1]);
+        const asyncBackup = parseStoredSnapshot(entries[6][1]);
+        const fileBackup = primaryBooks === undefined || entries[0][1] === null ? await readPersistentBackup<StorageSnapshot>('reader-state') : undefined;
+        const availableBackup = asyncBackup ?? fileBackup;
+        const recoveredSnapshot = primaryBooks === undefined || (entries[0][1] === null && availableBackup?.books.length)
+          ? availableBackup
+          : undefined;
+        if (primaryBooks === undefined && !recoveredSnapshot) throw new Error('Stored reader data could not be read safely.');
+        const effectivePositions = recoveredSnapshot?.positions ?? storedPositions;
+        const storedBooks = normalizeBooks(recoveredSnapshot?.books ?? primaryBooks ?? []).map((book) => {
+          const latestPosition = effectivePositions[book.id];
           const latestChapter = latestPosition?.chapter;
           return Number.isInteger(latestChapter) && latestChapter >= 1 && latestChapter <= book.totalChapters
             ? { ...book, chapter: latestChapter }
             : book;
         });
-        const requestedActive = entries[1][1] ?? initialSnapshot.activeId;
+        const requestedActive = entries[1][1] ?? recoveredSnapshot?.activeId ?? initialSnapshot.activeId;
         const storedActive = storedBooks.some((book) => book.id === requestedActive) ? requestedActive : storedBooks[0]?.id ?? '';
         const storedTheme = readJson<ReaderTheme | null>(entries[2][1], null);
         const storedPreferences = readJson<Partial<ReaderPreferences> | null>(entries[3][1], null);
@@ -233,22 +271,35 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         const nextSnapshot: StorageSnapshot = {
           books: storedBooks,
           activeId: storedActive,
-          preferences: nextPreferences,
-          bookmarks: storedBookmarks,
-          positions: storedPositions,
+          preferences: recoveredSnapshot?.preferences && primaryBooks === undefined ? recoveredSnapshot.preferences : nextPreferences,
+          bookmarks: recoveredSnapshot?.bookmarks && primaryBooks === undefined ? recoveredSnapshot.bookmarks : storedBookmarks,
+          positions: recoveredSnapshot?.positions && primaryBooks === undefined ? recoveredSnapshot.positions : storedPositions,
         };
 
         snapshotRef.current = nextSnapshot;
+        hydratedRef.current = true;
         setBooks(storedBooks);
         setActiveId(storedActive);
-        setReaderPreferences(nextPreferences);
-        setBookmarks(storedBookmarks);
-        setReadingPositions(storedPositions);
+        setReaderPreferences(nextSnapshot.preferences);
+        setBookmarks(nextSnapshot.bookmarks);
+        setReadingPositions(nextSnapshot.positions);
+        if (nextSnapshot.books.length > 0) {
+          await Promise.all([
+            AsyncStorage.setItem(readerBackupStorageKey, JSON.stringify(nextSnapshot)),
+            writePersistentBackup('reader-state', nextSnapshot),
+          ]).then(() => {
+            lastPersistentBackupAtRef.current = Date.now();
+          }).catch(() => {});
+        }
       })
-      .finally(() => setHydrated(true));
+      .then(() => setHydrated(true))
+      .catch(() => {
+        hydratedRef.current = false;
+      });
   }, []);
 
   const writeSnapshot = (changes: Partial<StorageSnapshot>) => {
+    if (!hydratedRef.current) return;
     const nextSnapshot = { ...snapshotRef.current, ...changes };
     snapshotRef.current = nextSnapshot;
     const revision = storageWriteRevisionRef.current + 1;
@@ -257,6 +308,9 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       .catch(() => {})
       .then(async () => {
         if (revision !== storageWriteRevisionRef.current) return;
+        if (nextSnapshot.books.length > 0) {
+          await AsyncStorage.setItem(readerBackupStorageKey, JSON.stringify(nextSnapshot));
+        }
         await AsyncStorage.multiSet([
           ['novel-books', JSON.stringify(nextSnapshot.books)],
           ['novel-active', nextSnapshot.activeId],
@@ -265,6 +319,10 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
           ['novel-bookmarks', JSON.stringify(nextSnapshot.bookmarks)],
           ['novel-positions', JSON.stringify(nextSnapshot.positions)],
         ]);
+        if (nextSnapshot.books.length > 0 && Date.now() - lastPersistentBackupAtRef.current >= 15_000) {
+          await writePersistentBackup('reader-state', nextSnapshot);
+          lastPersistentBackupAtRef.current = Date.now();
+        }
       });
   };
 

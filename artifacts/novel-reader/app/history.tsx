@@ -1,6 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BookCover } from '@/components/BookCover';
 import { SubscreenHeader } from '@/components/SubscreenHeader';
@@ -11,8 +11,8 @@ import { useColors } from '@/hooks/useColors';
 export default function HistoryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { history } = useApp();
-  const { books, setActiveBook, setActiveChapter } = useReader();
+  const { history, hydrated: appHydrated } = useApp();
+  const { books, hydrated: readerHydrated, setActiveBook, setActiveChapter } = useReader();
   const entries = history.map((entry) => ({ entry, book: books.find((book) => book.id === entry.bookId) })).filter((item) => item.book);
 
   const openEntry = (bookId: string, chapter: number) => {
@@ -29,7 +29,12 @@ export default function HistoryScreen() {
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
       >
-        {entries.length === 0 ? (
+        {!appHydrated || !readerHydrated ? (
+          <View style={styles.empty}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Loading saved history</Text>
+          </View>
+        ) : entries.length === 0 ? (
           <View style={styles.empty}>
             <Feather name="clock" size={24} color={colors.mutedForeground} />
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No history yet</Text>
