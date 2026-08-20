@@ -194,6 +194,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [readingSessions, setReadingSessions] = useState<ReadingSession[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const launchSyncStarted = useRef(false);
+  const storageWriteRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     AsyncStorage.multiGet(['prime-settings', 'prime-sources', 'prime-repositories', 'prime-available-sources', 'prime-shared-links', 'prime-history', 'prime-recent-searches', 'prime-reading-sessions'])
@@ -211,14 +212,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const persist = useCallback((next: Partial<AppSnapshot>) => {
-    if (next.settings) void AsyncStorage.setItem('prime-settings', JSON.stringify(next.settings));
-    if (next.sources) void AsyncStorage.setItem('prime-sources', JSON.stringify(next.sources));
-    if (next.repositories) void AsyncStorage.setItem('prime-repositories', JSON.stringify(next.repositories));
-    if (next.availableSources) void AsyncStorage.setItem('prime-available-sources', JSON.stringify(next.availableSources));
-    if (next.sharedLinks) void AsyncStorage.setItem('prime-shared-links', JSON.stringify(next.sharedLinks));
-    if (next.history) void AsyncStorage.setItem('prime-history', JSON.stringify(next.history));
-    if (next.recentSearches) void AsyncStorage.setItem('prime-recent-searches', JSON.stringify(next.recentSearches));
-    if (next.readingSessions) void AsyncStorage.setItem('prime-reading-sessions', JSON.stringify(next.readingSessions));
+    const entries: Array<[string, string]> = [];
+    if (next.settings) entries.push(['prime-settings', JSON.stringify(next.settings)]);
+    if (next.sources) entries.push(['prime-sources', JSON.stringify(next.sources)]);
+    if (next.repositories) entries.push(['prime-repositories', JSON.stringify(next.repositories)]);
+    if (next.availableSources) entries.push(['prime-available-sources', JSON.stringify(next.availableSources)]);
+    if (next.sharedLinks) entries.push(['prime-shared-links', JSON.stringify(next.sharedLinks)]);
+    if (next.history) entries.push(['prime-history', JSON.stringify(next.history)]);
+    if (next.recentSearches) entries.push(['prime-recent-searches', JSON.stringify(next.recentSearches)]);
+    if (next.readingSessions) entries.push(['prime-reading-sessions', JSON.stringify(next.readingSessions)]);
+    if (entries.length === 0) return;
+    storageWriteRef.current = storageWriteRef.current
+      .catch(() => {})
+      .then(() => AsyncStorage.multiSet(entries));
   }, []);
 
   const setSetting = useCallback(<Key extends keyof AppSettings>(key: Key, value: AppSettings[Key]) => {

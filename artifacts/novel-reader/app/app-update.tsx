@@ -3,7 +3,7 @@ import { Feather } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { router } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SubscreenHeader } from '@/components/SubscreenHeader';
@@ -38,6 +38,10 @@ export default function AppUpdateScreen() {
       setMessage(error instanceof Error ? error.message : 'The update check could not be completed.');
     }
   }, [version]);
+
+  useEffect(() => {
+    void checkForUpdates();
+  }, [checkForUpdates]);
 
   const downloadUpdate = async () => {
     if (!release) return;
@@ -83,7 +87,7 @@ export default function AppUpdateScreen() {
         ? `Prime Novel ${release?.version ?? 'new'} is ready to download.`
         : state === 'error'
           ? message ?? 'The update check could not be completed.'
-          : 'Check manually whenever you want to look for a newer release.';
+          : 'Prime Novel checks for a newer release when you open this screen.';
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>

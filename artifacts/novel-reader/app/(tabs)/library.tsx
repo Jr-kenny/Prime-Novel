@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { router } from 'expo-router';
 import { useLocalSearchParams } from 'expo-router';
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ShelfGridCard } from '@/components/shelf-grid-card';
 import { ShelfListRow } from '@/components/shelf-list-row';
@@ -19,7 +19,7 @@ export default function LibraryScreen() {
   const { width } = useWindowDimensions();
   const { category } = useLocalSearchParams<{ category?: string }>();
   const { settings } = useApp();
-  const { books, toggleFavorite, setActiveBook } = useReader();
+  const { books, hydrated, toggleFavorite, setActiveBook } = useReader();
   const [filter, setFilter] = useState<BookStatus | 'All'>('All');
   const visibleBooks = useMemo(() => {
     const byStatus = filter === 'All' ? books : books.filter((book) => book.status === filter);
@@ -59,7 +59,7 @@ export default function LibraryScreen() {
           </View>
         </>
       ) : null}
-      {visibleBooks.length === 0 ? <Text style={[styles.empty, { color: colors.mutedForeground }]}>Nothing in this part of your shelf yet.</Text> : null}
+      {hydrated && visibleBooks.length === 0 ? <Text style={[styles.empty, { color: colors.mutedForeground }]}>Nothing in this part of your shelf yet.</Text> : null}
       {showShelfLayout && otherBooks.length > 0 ? (
         <View style={styles.anotherLookHeader}>
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Another look</Text>
@@ -72,7 +72,12 @@ export default function LibraryScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <ScreenHeader eyebrow={category ?? 'Everything you keep'} title="Library" action="search" />
-      <FlatList
+      {!hydrated ? (
+        <View style={styles.loading}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.foreground }]}>Loading your library</Text>
+        </View>
+      ) : <FlatList
         columnWrapperStyle={styles.gridRow}
         contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
         data={showShelfLayout ? otherBooks : visibleBooks}
@@ -87,7 +92,7 @@ export default function LibraryScreen() {
         numColumns={2}
         renderItem={({ item, index }) => <ShelfGridCard book={item} index={index} onPress={() => openChapters(item.id)} width={gridCardWidth} />}
         showsVerticalScrollIndicator={false}
-      />
+      />}
     </View>
   );
 }
@@ -104,6 +109,8 @@ const styles = StyleSheet.create({
   list: { paddingHorizontal: 22 },
   gridRow: { paddingHorizontal: 22, justifyContent: 'space-between', gap: 14 },
   empty: { fontFamily: 'Georgia', fontSize: 17, textAlign: 'center', marginTop: 60, paddingHorizontal: 30 },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  loadingText: { fontFamily: 'Inter_500Medium', fontSize: 14 },
   resurface: { marginHorizontal: 22, borderTopWidth: 1, marginTop: 12, paddingTop: 22 },
   resurfaceTitle: { fontFamily: 'Georgia', fontSize: 18 },
   resurfaceCopy: { fontFamily: 'Inter_400Regular', fontSize: 12, lineHeight: 18, marginTop: 7 },

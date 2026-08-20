@@ -136,7 +136,7 @@ function readJson<T>(value: string | null, fallback: T): T {
 }
 
 function normalizeBooks(books: Book[]) {
-  return books.filter((book) => book.sourceId !== 'prime-catalog').map((book) => ({
+  return books.map((book) => ({
     ...book,
     sourceId: book.sourceId ?? 'prime-catalog',
     wordsPerChapter: book.wordsPerChapter ?? 154,
@@ -187,6 +187,8 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   const [readingPositions, setReadingPositions] = useState<Record<string, ReadingPosition>>({});
   const [hydrated, setHydrated] = useState(false);
   const snapshotRef = useRef<StorageSnapshot>(initialSnapshot);
+  const storageWriteRef = useRef<Promise<void>>(Promise.resolve());
+  const storageWriteRevisionRef = useRef(0);
 
   useEffect(() => {
     AsyncStorage.multiGet([
@@ -198,15 +200,22 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       'novel-positions',
     ])
       .then((entries) => {
-        const storedBooks = normalizeBooks(readJson<Book[]>(entries[0][1], []));
-        const storedActive = entries[1][1] ?? initialSnapshot.activeId;
+        const storedPositions = readJson<Record<string, ReadingPosition>>(entries[5][1], {});
+        const storedBooks = normalizeBooks(readJson<Book[]>(entries[0][1], [])).map((book) => {
+          const latestPosition = storedPositions[book.id];
+          const latestChapter = latestPosition?.chapter;
+          return Number.isInteger(latestChapter) && latestChapter >= 1 && latestChapter <= book.totalChapters
+            ? { ...book, chapter: latestChapter }
+            : book;
+        });
+        const requestedActive = entries[1][1] ?? initialSnapshot.activeId;
+        const storedActive = storedBooks.some((book) => book.id === requestedActive) ? requestedActive : storedBooks[0]?.id ?? '';
         const storedTheme = readJson<ReaderTheme | null>(entries[2][1], null);
         const storedPreferences = readJson<Partial<ReaderPreferences> | null>(entries[3][1], null);
         const storedBookmarks = normalizeBookmarks(
           readJson<Record<string, number[]> | number[] | null>(entries[4][1], null),
           storedActive,
         );
-        const storedPositions = readJson<Record<string, ReadingPosition>>(entries[5][1], {});
         const nextPreferences: ReaderPreferences = {
           ...defaultReaderPreferences,
           ...(storedTheme ? { theme: storedTheme } : {}),
@@ -242,14 +251,21 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   const writeSnapshot = (changes: Partial<StorageSnapshot>) => {
     const nextSnapshot = { ...snapshotRef.current, ...changes };
     snapshotRef.current = nextSnapshot;
-    void AsyncStorage.multiSet([
-      ['novel-books', JSON.stringify(nextSnapshot.books)],
-      ['novel-active', nextSnapshot.activeId],
-      ['novel-theme', nextSnapshot.preferences.theme],
-      ['novel-preferences', JSON.stringify(nextSnapshot.preferences)],
-      ['novel-bookmarks', JSON.stringify(nextSnapshot.bookmarks)],
-      ['novel-positions', JSON.stringify(nextSnapshot.positions)],
-    ]);
+    const revision = storageWriteRevisionRef.current + 1;
+    storageWriteRevisionRef.current = revision;
+    storageWriteRef.current = storageWriteRef.current
+      .catch(() => {})
+      .then(async () => {
+        if (revision !== storageWriteRevisionRef.current) return;
+        await AsyncStorage.multiSet([
+          ['novel-books', JSON.stringify(nextSnapshot.books)],
+          ['novel-active', nextSnapshot.activeId],
+          ['novel-theme', nextSnapshot.preferences.theme],
+          ['novel-preferences', JSON.stringify(nextSnapshot.preferences)],
+          ['novel-bookmarks', JSON.stringify(nextSnapshot.bookmarks)],
+          ['novel-positions', JSON.stringify(nextSnapshot.positions)],
+        ]);
+      });
   };
 
   const updateReaderPreferences = (changes: Partial<ReaderPreferences>) => {
@@ -480,12 +496,19 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     };
     const nextBooks = book
       ? snapshotRef.current.books.map((item) => item.id === bookId
-        ? { ...item, progress: Math.max(item.progress, bookProgressForPosition(item, chapter, nextPosition.chapterProgress)) }
+        ? {
+            ...item,
+            chapter,
+            progress: Math.max(item.progress, bookProgressForPosition(item, chapter, nextPosition.chapterProgress)),
+            lastRead: 'Just now',
+            status: item.status === 'New chapters' ? ('Continue' as BookStatus) : item.status,
+          }
         : item)
       : snapshotRef.current.books;
     setBooks(nextBooks);
+    if (book) setActiveId(bookId);
     setReadingPositions(nextPositions);
-    writeSnapshot({ books: nextBooks, positions: nextPositions });
+    writeSnapshot({ books: nextBooks, activeId: book ? bookId : snapshotRef.current.activeId, positions: nextPositions });
   };
 
   const activeBook = books.find((book) => book.id === activeId) ?? books[0];

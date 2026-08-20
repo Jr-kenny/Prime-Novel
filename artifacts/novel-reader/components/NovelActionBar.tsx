@@ -57,7 +57,8 @@ export function NovelActionBar({
       <Pressable
         accessibilityLabel={downloadComplete ? 'All chapters saved offline' : 'Download all chapters'}
         accessibilityRole="button"
-        disabled={downloadDisabled || downloadBusy}
+        accessibilityState={{ disabled: downloadDisabled || downloadBusy || downloadComplete }}
+        disabled={downloadDisabled || downloadBusy || downloadComplete}
         onPress={onDownloadPress}
         style={({ pressed }) => [styles.action, { backgroundColor: colors.card, borderColor: colors.border, opacity: downloadDisabled ? 0.42 : pressed ? 0.72 : 1 }]}
         testID="novel-download-action"

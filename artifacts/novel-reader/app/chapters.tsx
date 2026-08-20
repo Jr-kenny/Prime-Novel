@@ -262,7 +262,7 @@ export default function ChaptersScreen() {
         downloadBusy={Boolean(bulkDownload)}
         downloadComplete={allChaptersDownloaded}
         downloadDisabled={!catalogNovel}
-        downloadLabel={bulkDownload ? `${bulkDownload.completed}/${bulkDownload.total}` : 'Download all'}
+        downloadLabel={bulkDownload ? `${bulkDownload.completed}/${bulkDownload.total}` : allChaptersDownloaded ? 'Downloaded' : 'Download all'}
         favorite={Boolean(activeBook.favorite)}
         inLibrary
         onDownloadPress={() => void saveAllChaptersOffline()}

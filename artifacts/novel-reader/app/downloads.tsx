@@ -1,5 +1,5 @@
 import { Feather } from '@expo/vector-icons';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SubscreenHeader } from '@/components/SubscreenHeader';
 import { useColors } from '@/hooks/useColors';
@@ -8,12 +8,17 @@ import { useCatalog } from '@/context/CatalogContext';
 export default function DownloadsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { downloads, removeDownload } = useCatalog();
+  const { downloads, downloadsHydrated, removeDownload } = useCatalog();
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <SubscreenHeader title="Downloads" />
-      {downloads.length === 0 ? (
+      {!downloadsHydrated ? (
+        <View style={[styles.empty, { paddingBottom: insets.bottom + 40 }]}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Loading downloads</Text>
+        </View>
+      ) : downloads.length === 0 ? (
         <View style={[styles.empty, { paddingBottom: insets.bottom + 40 }]}>
           <Feather name="download" size={24} color={colors.mutedForeground} />
           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No downloads yet</Text>

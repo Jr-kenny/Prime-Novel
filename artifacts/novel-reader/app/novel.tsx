@@ -140,6 +140,8 @@ export default function NovelScreen() {
     setNotice(result.failed > 0 ? `${result.downloaded} chapters saved. ${result.failed} could not be downloaded.` : `${result.downloaded} chapters saved for offline reading.`);
   };
 
+  const allChaptersDownloaded = Boolean(novel?.chapters.length && novel.chapters.every((chapter) => downloads.some((download) => download.key === `${novel.sourceId}:${chapter.id}`)));
+
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: insets.top + 10, borderBottomColor: colors.border }]}>
@@ -192,9 +194,9 @@ export default function NovelScreen() {
               ) : null}
               <NovelActionBar
                 downloadBusy={Boolean(bulkDownload)}
-                downloadComplete={novel.chapters.length > 0 && novel.chapters.every((chapter) => downloads.some((download) => download.key === `${novel.sourceId}:${chapter.id}`))}
+                downloadComplete={allChaptersDownloaded}
                 downloadDisabled={novel.chapters.length === 0}
-                downloadLabel={bulkDownload ? `${bulkDownload.completed}/${bulkDownload.total}` : 'Download all'}
+                downloadLabel={bulkDownload ? `${bulkDownload.completed}/${bulkDownload.total}` : allChaptersDownloaded ? 'Downloaded' : 'Download all'}
                 favorite={Boolean(existingBook?.favorite)}
                 inLibrary={Boolean(existingBook)}
                 onDownloadPress={() => void saveAllChaptersOffline()}

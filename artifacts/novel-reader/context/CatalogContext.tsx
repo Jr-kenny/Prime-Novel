@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { PRIME_SOURCE_REGISTRY, getPrimeSource } from '@/data/prime-sources';
@@ -22,7 +23,7 @@ export type DownloadedChapter = {
   novelId: string;
   novelTitle: string;
   chapter: PrimeChapter;
-  content: PrimeChapterContent;
+  content?: PrimeChapterContent;
   downloadedAt: number;
 };
 
@@ -32,6 +33,7 @@ type CatalogContextValue = {
   searching: boolean;
   searchError?: string;
   downloads: DownloadedChapter[];
+  downloadsHydrated: boolean;
   search: (query: string) => Promise<void>;
   getNovel: (novel: PrimeNovel) => Promise<PrimeNovelDetails>;
   getChapter: (chapter: PrimeChapter, sourceId: string) => Promise<PrimeChapterContent>;
@@ -46,11 +48,56 @@ type CatalogContextValue = {
   clearResults: () => void;
 };
 
-const downloadsStorageKey = 'prime-chapter-cache';
+const legacyDownloadsStorageKey = 'prime-chapter-cache';
+const downloadsStorageKey = 'prime-chapter-index-v2';
+const downloadContentStoragePrefix = 'prime-chapter-content:';
+const downloadDirectory = FileSystem.documentDirectory ? `${FileSystem.documentDirectory}prime-novel/chapters/` : undefined;
 const CatalogContext = createContext<CatalogContextValue | null>(null);
 
 function chapterCacheKey(sourceId: string, chapterId: string) {
   return `${sourceId}:${chapterId}`;
+}
+
+function cacheFileName(key: string) {
+  let first = 2166136261;
+  let second = 5381;
+  for (let index = 0; index < key.length; index += 1) {
+    const character = key.charCodeAt(index);
+    first = Math.imul(first ^ character, 16777619);
+    second = Math.imul(second, 33) ^ character;
+  }
+  return `${first >>> 0}-${second >>> 0}.json`;
+}
+
+function downloadMetadata(download: DownloadedChapter): DownloadedChapter {
+  const { content: _content, ...metadata } = download;
+  return metadata;
+}
+
+async function writeChapterContent(key: string, content: PrimeChapterContent) {
+  const value = JSON.stringify(content);
+  if (Platform.OS !== 'web' && downloadDirectory) {
+    await FileSystem.makeDirectoryAsync(downloadDirectory, { intermediates: true });
+    await FileSystem.writeAsStringAsync(`${downloadDirectory}${cacheFileName(key)}`, value);
+    return;
+  }
+  await AsyncStorage.setItem(`${downloadContentStoragePrefix}${key}`, value);
+}
+
+async function readChapterContent(key: string) {
+  const value = Platform.OS !== 'web' && downloadDirectory
+    ? await FileSystem.readAsStringAsync(`${downloadDirectory}${cacheFileName(key)}`)
+    : await AsyncStorage.getItem(`${downloadContentStoragePrefix}${key}`);
+  if (!value) throw new Error('The offline chapter file is missing.');
+  return JSON.parse(value) as PrimeChapterContent;
+}
+
+async function deleteChapterContent(key: string) {
+  if (Platform.OS !== 'web' && downloadDirectory) {
+    await FileSystem.deleteAsync(`${downloadDirectory}${cacheFileName(key)}`, { idempotent: true });
+    return;
+  }
+  await AsyncStorage.removeItem(`${downloadContentStoragePrefix}${key}`);
 }
 
 function normalizeSearchText(value: string) {
@@ -87,31 +134,55 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | undefined>();
   const [downloads, setDownloads] = useState<DownloadedChapter[]>([]);
+  const [downloadsHydrated, setDownloadsHydrated] = useState(false);
   const downloadsRef = useRef<DownloadedChapter[]>([]);
   const downloadsHydrationRef = useRef<Promise<void>>(Promise.resolve());
+  const downloadsWriteRef = useRef<Promise<void>>(Promise.resolve());
+  const downloadsWriteRevisionRef = useRef(0);
   const searchRequestRef = useRef(0);
 
   useEffect(() => {
-    downloadsHydrationRef.current = AsyncStorage.getItem(downloadsStorageKey)
-      .then((value) => {
-        if (!value) return;
-        try {
-          const stored = JSON.parse(value) as DownloadedChapter[];
-          downloadsRef.current = stored;
-          setDownloads(stored);
-        } catch {
-          downloadsRef.current = [];
+    downloadsHydrationRef.current = AsyncStorage.multiGet([downloadsStorageKey, legacyDownloadsStorageKey])
+      .then(async (entries) => {
+        const indexed = entries[0][1];
+        const legacy = entries[1][1];
+        const stored = indexed
+          ? JSON.parse(indexed) as DownloadedChapter[]
+          : legacy
+            ? JSON.parse(legacy) as DownloadedChapter[]
+            : [];
+        downloadsRef.current = stored;
+        setDownloads(stored.map(downloadMetadata));
+
+        if (!indexed && legacy && stored.length > 0) {
+          await Promise.all(stored.map(async (download) => {
+            if (download.content) await writeChapterContent(download.key, download.content);
+          }));
+          await AsyncStorage.setItem(downloadsStorageKey, JSON.stringify(stored.map(downloadMetadata)));
+          await AsyncStorage.removeItem(legacyDownloadsStorageKey);
+          downloadsRef.current = stored.map(downloadMetadata);
         }
       })
       .catch(() => {
         downloadsRef.current = [];
-      });
+        setDownloads([]);
+      })
+      .finally(() => setDownloadsHydrated(true));
   }, []);
 
-  const persistDownloads = useCallback((next: DownloadedChapter[]) => {
-    downloadsRef.current = next;
-    setDownloads(next);
-    void AsyncStorage.setItem(downloadsStorageKey, JSON.stringify(next));
+  const persistDownloads = useCallback(async (next: DownloadedChapter[]) => {
+    const metadata = next.map(downloadMetadata);
+    downloadsRef.current = metadata;
+    setDownloads(metadata);
+    const revision = downloadsWriteRevisionRef.current + 1;
+    downloadsWriteRevisionRef.current = revision;
+    downloadsWriteRef.current = downloadsWriteRef.current
+      .catch(() => {})
+      .then(async () => {
+        if (revision !== downloadsWriteRevisionRef.current) return;
+        await AsyncStorage.setItem(downloadsStorageKey, JSON.stringify(downloadsRef.current.map(downloadMetadata)));
+      });
+    await downloadsWriteRef.current;
   }, []);
 
   const enabledSources = useMemo(
@@ -176,16 +247,31 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     await downloadsHydrationRef.current;
     const key = chapterCacheKey(sourceId, chapter.id);
     const cached = downloadsRef.current.find((download) => download.key === key);
-    if (cached) return cached.content;
+    if (cached?.content) return cached.content;
+    if (cached) {
+      try {
+        return await readChapterContent(key);
+      } catch {
+        await persistDownloads(downloadsRef.current.filter((download) => download.key !== key));
+      }
+    }
     const source = getPrimeSource(sourceId);
     if (!source) throw new Error('This chapter source is unavailable.');
     return Platform.OS === 'web' ? loadPrimeChapterOnWeb(chapter, sourceId) : loadPrimeChapter(source, chapter);
-  }, []);
+  }, [persistDownloads]);
 
   const downloadChapter = useCallback(async (novel: PrimeNovel, chapter: PrimeChapter) => {
+    await downloadsHydrationRef.current;
     const key = chapterCacheKey(novel.sourceId, chapter.id);
     const existing = downloadsRef.current.find((download) => download.key === key);
-    if (existing) return existing;
+    if (existing) {
+      try {
+        const content = existing.content ?? await readChapterContent(key);
+        return { ...existing, content };
+      } catch {
+        await persistDownloads(downloadsRef.current.filter((download) => download.key !== key));
+      }
+    }
     const content = await getChapter(chapter, novel.sourceId);
     const download: DownloadedChapter = {
       key,
@@ -196,7 +282,9 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
       content,
       downloadedAt: Date.now(),
     };
-    persistDownloads([download, ...downloadsRef.current]);
+    await writeChapterContent(key, content);
+    const concurrentlyStored = downloadsRef.current.find((item) => item.key === key);
+    if (!concurrentlyStored) await persistDownloads([download, ...downloadsRef.current]);
     return download;
   }, [getChapter, persistDownloads]);
 
@@ -237,7 +325,9 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   }, [downloadChapter, settings.downloadConcurrency]);
 
   const removeDownload = useCallback((key: string) => {
-    persistDownloads(downloadsRef.current.filter((download) => download.key !== key));
+    void persistDownloads(downloadsRef.current.filter((download) => download.key !== key))
+      .then(() => deleteChapterContent(key))
+      .catch(() => {});
   }, [persistDownloads]);
 
   const getDownloadedChapter = useCallback((key: string) => downloadsRef.current.find((download) => download.key === key), []);
@@ -255,6 +345,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     searching,
     searchError,
     downloads,
+    downloadsHydrated,
     search,
     getNovel,
     getChapter,
@@ -263,7 +354,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     removeDownload,
     getDownloadedChapter,
     clearResults,
-  }), [clearResults, downloadAllChapters, downloadChapter, downloads, getChapter, getDownloadedChapter, getNovel, removeDownload, results, search, searchError, searching, sourceResults]);
+  }), [clearResults, downloadAllChapters, downloadChapter, downloads, downloadsHydrated, getChapter, getDownloadedChapter, getNovel, removeDownload, results, search, searchError, searching, sourceResults]);
 
   return <CatalogContext.Provider value={value}>{children}</CatalogContext.Provider>;
 }
