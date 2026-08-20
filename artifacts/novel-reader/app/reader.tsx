@@ -506,7 +506,12 @@ export default function ReaderScreen() {
   useEffect(() => {
     if (!hydrated || !appHydrated || !hasActiveBook) return;
 
-    recordHistory({ bookId: activeBook.id, chapter: activeBook.chapter });
+    recordHistory({
+      bookId: activeBook.id,
+      bookTitle: activeBook.title,
+      bookCover: activeBook.cover,
+      chapter: activeBook.chapter,
+    });
     let lastRecordedAt = Date.now();
     const interval = setInterval(() => {
       const now = Date.now();

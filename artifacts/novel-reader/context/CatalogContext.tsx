@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { PRIME_SOURCE_REGISTRY, getPrimeSource } from '@/data/prime-sources';
 import { useApp } from '@/context/AppContext';
 import {
@@ -18,6 +18,7 @@ import {
 import { loadPrimeChapterOnWeb, loadPrimeNovelOnWeb, searchPrimeSourcesOnWebIncremental } from '@/utils/catalog-web-api';
 import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
 import { rankTitleSearchResults } from '@/utils/search-ranking';
+import { durableStorageWrite } from '@/utils/durable-storage';
 
 export type DownloadedChapter = {
   key: string;
@@ -133,8 +134,19 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   const downloadsRef = useRef<DownloadedChapter[]>([]);
   const downloadsHydrationRef = useRef<Promise<void>>(Promise.resolve());
   const downloadsWriteRef = useRef<Promise<void>>(Promise.resolve());
-  const downloadsWriteRevisionRef = useRef(0);
+  const downloadsHydratedRef = useRef(false);
+  const lastDownloadsBackupAtRef = useRef(0);
   const searchRequestRef = useRef(0);
+
+  const commitDownloads = useCallback(async (metadata: DownloadedChapter[]) => {
+    await durableStorageWrite(() => AsyncStorage.setItem(downloadsStorageKey, JSON.stringify(metadata)));
+    if (metadata.length === 0) return;
+    void AsyncStorage.setItem(downloadsBackupStorageKey, JSON.stringify(metadata)).catch(() => {});
+    if (Date.now() - lastDownloadsBackupAtRef.current >= 15_000) {
+      lastDownloadsBackupAtRef.current = Date.now();
+      void writePersistentBackup('download-index', metadata).catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     downloadsHydrationRef.current = AsyncStorage.multiGet([downloadsStorageKey, legacyDownloadsStorageKey, downloadsBackupStorageKey])
@@ -171,29 +183,35 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
           ]).catch(() => {});
         }
       })
-      .then(() => setDownloadsHydrated(true))
-      .catch(() => setDownloadsHydrated(false));
+      .then(() => {
+        downloadsHydratedRef.current = true;
+        setDownloadsHydrated(true);
+      })
+      .catch(() => {
+        downloadsHydratedRef.current = false;
+        setDownloadsHydrated(false);
+      });
   }, []);
 
   const persistDownloads = useCallback(async (next: DownloadedChapter[]) => {
     const metadata = next.map(downloadMetadata);
     downloadsRef.current = metadata;
     setDownloads(metadata);
-    const revision = downloadsWriteRevisionRef.current + 1;
-    downloadsWriteRevisionRef.current = revision;
     downloadsWriteRef.current = downloadsWriteRef.current
       .catch(() => {})
-      .then(async () => {
-        if (revision !== downloadsWriteRevisionRef.current) return;
-        const currentMetadata = downloadsRef.current.map(downloadMetadata);
-        if (currentMetadata.length > 0) {
-          await AsyncStorage.setItem(downloadsBackupStorageKey, JSON.stringify(currentMetadata));
-        }
-        await AsyncStorage.setItem(downloadsStorageKey, JSON.stringify(currentMetadata));
-        if (currentMetadata.length > 0) await writePersistentBackup('download-index', currentMetadata);
-      });
+      .then(() => commitDownloads(metadata));
     await downloadsWriteRef.current;
-  }, []);
+  }, [commitDownloads]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' || !downloadsHydratedRef.current) return;
+      downloadsWriteRef.current = downloadsWriteRef.current
+        .catch(() => {})
+        .then(() => commitDownloads(downloadsRef.current.map(downloadMetadata)));
+    });
+    return () => subscription.remove();
+  }, [commitDownloads]);
 
   const enabledSources = useMemo(
     () => PRIME_SOURCE_REGISTRY.filter((source) => source.active !== false && sources.find((record) => record.id === source.id)?.enabled !== false),

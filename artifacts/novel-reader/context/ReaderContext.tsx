@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
+import { durableStorageWrite } from '@/utils/durable-storage';
 import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
 
 export type BookStatus = 'New chapters' | 'Continue' | 'On hold' | 'Plan to read' | 'Completed';
@@ -214,9 +216,25 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const snapshotRef = useRef<StorageSnapshot>(initialSnapshot);
   const storageWriteRef = useRef<Promise<void>>(Promise.resolve());
-  const storageWriteRevisionRef = useRef(0);
   const hydratedRef = useRef(false);
   const lastPersistentBackupAtRef = useRef(0);
+
+  const commitSnapshot = useCallback(async (snapshot: StorageSnapshot) => {
+    await durableStorageWrite(() => AsyncStorage.multiSet([
+      ['novel-books', JSON.stringify(snapshot.books)],
+      ['novel-active', snapshot.activeId],
+      ['novel-theme', snapshot.preferences.theme],
+      ['novel-preferences', JSON.stringify(snapshot.preferences)],
+      ['novel-bookmarks', JSON.stringify(snapshot.bookmarks)],
+      ['novel-positions', JSON.stringify(snapshot.positions)],
+    ]));
+    if (snapshot.books.length === 0) return;
+    void AsyncStorage.setItem(readerBackupStorageKey, JSON.stringify(snapshot)).catch(() => {});
+    if (Date.now() - lastPersistentBackupAtRef.current >= 15_000) {
+      lastPersistentBackupAtRef.current = Date.now();
+      void writePersistentBackup('reader-state', snapshot).catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     AsyncStorage.multiGet([
@@ -302,29 +320,20 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     if (!hydratedRef.current) return;
     const nextSnapshot = { ...snapshotRef.current, ...changes };
     snapshotRef.current = nextSnapshot;
-    const revision = storageWriteRevisionRef.current + 1;
-    storageWriteRevisionRef.current = revision;
     storageWriteRef.current = storageWriteRef.current
       .catch(() => {})
-      .then(async () => {
-        if (revision !== storageWriteRevisionRef.current) return;
-        if (nextSnapshot.books.length > 0) {
-          await AsyncStorage.setItem(readerBackupStorageKey, JSON.stringify(nextSnapshot));
-        }
-        await AsyncStorage.multiSet([
-          ['novel-books', JSON.stringify(nextSnapshot.books)],
-          ['novel-active', nextSnapshot.activeId],
-          ['novel-theme', nextSnapshot.preferences.theme],
-          ['novel-preferences', JSON.stringify(nextSnapshot.preferences)],
-          ['novel-bookmarks', JSON.stringify(nextSnapshot.bookmarks)],
-          ['novel-positions', JSON.stringify(nextSnapshot.positions)],
-        ]);
-        if (nextSnapshot.books.length > 0 && Date.now() - lastPersistentBackupAtRef.current >= 15_000) {
-          await writePersistentBackup('reader-state', nextSnapshot);
-          lastPersistentBackupAtRef.current = Date.now();
-        }
-      });
+      .then(() => commitSnapshot(nextSnapshot));
   };
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' || !hydratedRef.current) return;
+      storageWriteRef.current = storageWriteRef.current
+        .catch(() => {})
+        .then(() => commitSnapshot(snapshotRef.current));
+    });
+    return () => subscription.remove();
+  }, [commitSnapshot]);
 
   const updateReaderPreferences = (changes: Partial<ReaderPreferences>) => {
     const nextPreferences = { ...snapshotRef.current.preferences, ...changes };

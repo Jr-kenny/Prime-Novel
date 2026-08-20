@@ -119,9 +119,9 @@ function reconstructBooks(history: HistoryEntry[], downloads: DownloadedChapter[
       : inferBookIdentity(bookId);
     return {
       id: bookId,
-      title: firstDownload?.novelTitle || inferredTitle(bookId),
+      title: firstDownload?.novelTitle || latestHistory?.bookTitle || inferredTitle(bookId),
       author: 'Unknown author',
-      cover: '',
+      cover: latestHistory?.bookCover ?? '',
       sourceId: identity.sourceId,
       sourceUrl: identity.sourceUrl,
       wordsPerChapter: 1200,

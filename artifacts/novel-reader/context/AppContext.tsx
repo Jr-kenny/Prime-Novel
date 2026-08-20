@@ -1,10 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import type { RepositoryPackage, RepositoryPackageType } from '@/utils/repository-sync';
 import { fetchRepositoryPackages } from '@/utils/repository-sync';
 import { downloadSourcePackage } from '@/utils/source-download';
 import { PRIME_SOURCE_REGISTRY } from '@/data/prime-sources';
 import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
+import { durableStorageWrite } from '@/utils/durable-storage';
 
 export type LibraryLayout = 'shelf' | 'grid';
 export type UpdateFrequency = 'off' | 'hourly' | 'daily';
@@ -60,6 +62,8 @@ export type AvailableSource = RepositoryPackage & {
 export type HistoryEntry = {
   id: string;
   bookId: string;
+  bookTitle?: string;
+  bookCover?: number | string;
   chapter: number;
   openedAt: number;
 };
@@ -225,6 +229,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const hydratedRef = useRef(false);
   const lastPersistentBackupAtRef = useRef(0);
 
+  const commitSnapshot = useCallback(async (snapshot: AppSnapshot) => {
+    await durableStorageWrite(() => AsyncStorage.multiSet([
+      ['prime-settings', JSON.stringify(snapshot.settings)],
+      ['prime-sources', JSON.stringify(snapshot.sources)],
+      ['prime-repositories', JSON.stringify(snapshot.repositories)],
+      ['prime-available-sources', JSON.stringify(snapshot.availableSources)],
+      ['prime-shared-links', JSON.stringify(snapshot.sharedLinks)],
+      ['prime-history', JSON.stringify(snapshot.history)],
+      ['prime-recent-searches', JSON.stringify(snapshot.recentSearches)],
+      ['prime-reading-sessions', JSON.stringify(snapshot.readingSessions)],
+    ]));
+    void AsyncStorage.setItem(appBackupStorageKey, JSON.stringify(snapshot)).catch(() => {});
+    if (Date.now() - lastPersistentBackupAtRef.current >= 15_000) {
+      lastPersistentBackupAtRef.current = Date.now();
+      void writePersistentBackup('app-state', snapshot).catch(() => {});
+    }
+  }, []);
+
   useEffect(() => {
     AsyncStorage.multiGet(['prime-settings', 'prime-sources', 'prime-repositories', 'prime-available-sources', 'prime-shared-links', 'prime-history', 'prime-recent-searches', 'prime-reading-sessions', appBackupStorageKey])
       .then(async (entries) => {
@@ -270,27 +292,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!hydratedRef.current) return;
     const nextSnapshot = { ...snapshotRef.current, ...next };
     snapshotRef.current = nextSnapshot;
-    const entries: Array<[string, string]> = [];
-    if (next.settings) entries.push(['prime-settings', JSON.stringify(next.settings)]);
-    if (next.sources) entries.push(['prime-sources', JSON.stringify(next.sources)]);
-    if (next.repositories) entries.push(['prime-repositories', JSON.stringify(next.repositories)]);
-    if (next.availableSources) entries.push(['prime-available-sources', JSON.stringify(next.availableSources)]);
-    if (next.sharedLinks) entries.push(['prime-shared-links', JSON.stringify(next.sharedLinks)]);
-    if (next.history) entries.push(['prime-history', JSON.stringify(next.history)]);
-    if (next.recentSearches) entries.push(['prime-recent-searches', JSON.stringify(next.recentSearches)]);
-    if (next.readingSessions) entries.push(['prime-reading-sessions', JSON.stringify(next.readingSessions)]);
-    if (entries.length === 0) return;
     storageWriteRef.current = storageWriteRef.current
       .catch(() => {})
-      .then(async () => {
-        await AsyncStorage.setItem(appBackupStorageKey, JSON.stringify(nextSnapshot));
-        await AsyncStorage.multiSet(entries);
-        if (Date.now() - lastPersistentBackupAtRef.current >= 15_000) {
-          await writePersistentBackup('app-state', nextSnapshot);
-          lastPersistentBackupAtRef.current = Date.now();
-        }
-      });
-  }, []);
+      .then(() => commitSnapshot(nextSnapshot));
+  }, [commitSnapshot]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' || !hydratedRef.current) return;
+      storageWriteRef.current = storageWriteRef.current
+        .catch(() => {})
+        .then(() => commitSnapshot(snapshotRef.current));
+    });
+    return () => subscription.remove();
+  }, [commitSnapshot]);
 
   const setSetting = useCallback(<Key extends keyof AppSettings>(key: Key, value: AppSettings[Key]) => {
     setSettings((current) => {
