@@ -118,7 +118,11 @@ async function writeChapterContent(key: string, content: PrimeChapterContent) {
   const value = JSON.stringify(content);
   if (Platform.OS !== 'web' && downloadDirectory) {
     await FileSystem.makeDirectoryAsync(downloadDirectory, { intermediates: true });
-    await FileSystem.writeAsStringAsync(`${downloadDirectory}${cacheFileName(key)}`, value);
+    const destination = `${downloadDirectory}${cacheFileName(key)}`;
+    const temporary = `${destination}.tmp`;
+    await FileSystem.writeAsStringAsync(temporary, value);
+    await FileSystem.deleteAsync(destination, { idempotent: true });
+    await FileSystem.moveAsync({ from: temporary, to: destination });
     return;
   }
   await AsyncStorage.setItem(`${downloadContentStoragePrefix}${key}`, value);
