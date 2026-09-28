@@ -12,15 +12,16 @@ function assert(condition: boolean, message: string) {
 }
 
 const chapters = [
-  { key: 'src:c1', id: 'c1', number: 1, title: 'One' },
-  { key: 'src:c2', id: 'c2', number: 2, title: 'Two' },
-  { key: 'src:c3', id: 'c3', number: 3, title: 'Three' },
+  { key: 'src:c1', id: 'c1', number: 1, title: 'One', url: 'https://example.com/1' },
+  { key: 'src:c2', id: 'c2', number: 2, title: 'Two', url: 'https://example.com/2' },
+  { key: 'src:c3', id: 'c3', number: 3, title: 'Three', url: 'https://example.com/3' },
 ];
 
 const job = createDownloadJob({
   sourceId: 'src',
   novelId: 'novel-1',
   novelTitle: 'Sample',
+  novelUrl: 'https://example.com/novel',
   chapters,
 });
 
@@ -31,6 +32,7 @@ const afterSkip = createDownloadJob({
   sourceId: 'src',
   novelId: 'novel-1',
   novelTitle: 'Sample',
+  novelUrl: 'https://example.com/novel',
   chapters,
 });
 const pendingAfterOne = jobPendingChapters(afterSkip, new Set(['src:c1']));

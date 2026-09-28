@@ -5,6 +5,8 @@ export type DownloadJobChapter = {
   id: string;
   number: number;
   title: string;
+  url: string;
+  releaseDate?: string;
 };
 
 export type DownloadJob = {
@@ -12,6 +14,7 @@ export type DownloadJob = {
   sourceId: string;
   novelId: string;
   novelTitle: string;
+  novelUrl: string;
   chapters: DownloadJobChapter[];
   completedKeys: string[];
   failedKeys: string[];
@@ -24,6 +27,7 @@ export function createDownloadJob(input: {
   sourceId: string;
   novelId: string;
   novelTitle: string;
+  novelUrl: string;
   chapters: DownloadJobChapter[];
 }): DownloadJob {
   const now = Date.now();
@@ -32,6 +36,7 @@ export function createDownloadJob(input: {
     sourceId: input.sourceId,
     novelId: input.novelId,
     novelTitle: input.novelTitle,
+    novelUrl: input.novelUrl,
     chapters: input.chapters,
     completedKeys: [],
     failedKeys: [],
@@ -94,5 +99,16 @@ export function jobProgress(job: DownloadJob): { completed: number; total: numbe
     completed: job.completedKeys.length,
     total: job.chapters.length,
     failed: job.failedKeys.length,
+  };
+}
+
+export function jobChapterToPrimeChapter(job: DownloadJob, chapter: DownloadJobChapter) {
+  return {
+    id: chapter.id,
+    novelId: job.novelId,
+    number: chapter.number,
+    title: chapter.title,
+    url: chapter.url,
+    releaseDate: chapter.releaseDate,
   };
 }
