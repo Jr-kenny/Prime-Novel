@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { durableStorageWrite } from './durable-storage';
-import type { DownloadJob } from './download-jobs';
+import { markInterruptedJobs, type DownloadJob } from './download-jobs';
 
 const downloadJobsStorageKey = 'prime-download-jobs-v1';
 const downloadJobsBackupKey = 'prime-download-jobs-backup-v1';
@@ -22,7 +22,7 @@ export async function loadDownloadJobs(): Promise<DownloadJob[]> {
   const primary = parseJobs(entries[0][1]);
   const backup = parseJobs(entries[1][1]);
   const stored = primary === undefined ? backup : primary;
-  return stored ?? [];
+  return markInterruptedJobs(stored ?? []);
 }
 
 export async function saveDownloadJobs(jobs: DownloadJob[]): Promise<void> {

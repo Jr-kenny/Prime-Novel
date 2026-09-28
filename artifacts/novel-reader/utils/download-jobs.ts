@@ -81,6 +81,14 @@ export function isJobResumable(job: DownloadJob | undefined): job is DownloadJob
   return Boolean(job && job.status !== 'completed' && job.chapters.length > 0);
 }
 
+export function markInterruptedJobs(jobs: DownloadJob[]): DownloadJob[] {
+  return jobs.map((job) => (
+    job.status === 'running'
+      ? { ...job, status: 'interrupted' as const, updatedAt: Date.now() }
+      : job
+  ));
+}
+
 export function jobProgress(job: DownloadJob): { completed: number; total: number; failed: number } {
   return {
     completed: job.completedKeys.length,
