@@ -1,14 +1,12 @@
 import Constants from 'expo-constants';
 import { Feather } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as IntentLauncher from 'expo-intent-launcher';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SubscreenHeader } from '@/components/SubscreenHeader';
 import { useColors } from '@/hooks/useColors';
-import { platformRelease, releaseUrl, type AppRelease } from '@/utils/app-updates';
+import type { AppRelease } from '@/utils/app-updates';
 import {
   loadLastUpdateCheck,
   runUpdateCheck,
@@ -16,28 +14,22 @@ import {
   type UpdateCheckResult,
   type UpdateCheckState,
 } from '@/utils/update-check';
-import { createPreUpdateBackup } from '@/utils/data-recovery';
+import {
+  downloadAndInstallUpdate,
+  updateInstallPhaseCopy,
+  type UpdateInstallPhase,
+} from '@/utils/app-update-install';
 
-type ScreenState = UpdateCheckState | 'downloading' | 'download-error';
-
-const installerFlags = 1;
-
-function installerAction() {
-  return 'android.intent.action.VIEW';
-}
+type ScreenState = UpdateCheckState;
 
 function statusBadge(state: ScreenState, result?: UpdateCheckResult): { label: string; tone: 'neutral' | 'positive' | 'warning' | 'danger' } {
   switch (state) {
     case 'checking':
       return { label: 'Checking for updates...', tone: 'neutral' };
-    case 'downloading':
-      return { label: 'Downloading update...', tone: 'neutral' };
     case 'up-to-date':
       return { label: "You're up to date", tone: 'positive' };
     case 'available':
       return { label: `Update available — Version ${result?.availableVersion ?? 'new'}`, tone: 'warning' };
-    case 'download-error':
-      return { label: 'Update download failed', tone: 'danger' };
     case 'error':
       return { label: 'Unable to check for updates', tone: 'danger' };
     default:
@@ -53,6 +45,8 @@ export default function AppUpdateScreen() {
   const [release, setRelease] = useState<AppRelease>();
   const [message, setMessage] = useState<string>();
   const [lastCheckedAt, setLastCheckedAt] = useState<number | undefined>();
+  const [installPhase, setInstallPhase] = useState<UpdateInstallPhase>('idle');
+  const [installProgress, setInstallProgress] = useState(0);
   const version = Constants.expoConfig?.version ?? result?.currentVersion ?? '1.0.0';
 
   const checkForUpdates = useCallback(async () => {
@@ -81,50 +75,27 @@ export default function AppUpdateScreen() {
     };
   }, [checkForUpdates]);
 
-  const downloadUpdate = async () => {
-    if (!release) return;
-    const target = platformRelease(release);
-    if (!target?.url) {
-      setMessage(Platform.OS === 'ios' ? 'The iOS release is not available yet.' : 'No download is attached to this release.');
-      setState('download-error');
-      return;
-    }
-
-    const url = releaseUrl(target.url);
-    if (Platform.OS !== 'android' || !FileSystem.documentDirectory) {
-      await Linking.openURL(url);
-      return;
-    }
-
-    setState('downloading');
-    setMessage('Downloading the update');
-    try {
-      await createPreUpdateBackup();
-      const directory = `${FileSystem.documentDirectory}prime-novel/updates/`;
-      await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
-      const destination = `${directory}Prime-Novel-${release.version}.apk`;
-      const downloadResult = await FileSystem.downloadAsync(url, destination);
-      if (downloadResult.status < 200 || downloadResult.status >= 300) throw new Error(`Download returned ${downloadResult.status}.`);
-      const contentUri = await FileSystem.getContentUriAsync(downloadResult.uri);
-      await IntentLauncher.startActivityAsync(installerAction(), {
-        data: contentUri,
-        type: 'application/vnd.android.package-archive',
-        flags: installerFlags,
-      });
-      setState('available');
-      setMessage('Android opened the installer. Approve the update there.');
-    } catch (error) {
-      setState('download-error');
-      setMessage(error instanceof Error ? error.message : 'The update download could not be completed.');
-    }
+  const downloadAndInstall = async () => {
+    if (!release || installPhase === 'downloading' || installPhase === 'installing' || installPhase === 'preparing') return;
+    setInstallPhase('preparing');
+    setInstallProgress(0);
+    setMessage(undefined);
+    const installResult = await downloadAndInstallUpdate(release, (progress) => {
+      setInstallPhase(progress.phase);
+      setInstallProgress(progress.progress);
+      if (progress.message) setMessage(progress.message);
+    });
+    setInstallPhase(installResult.phase);
+    if (installResult.message) setMessage(installResult.message);
   };
 
+  const busy = installPhase === 'preparing' || installPhase === 'downloading' || installPhase === 'installing';
+  const installCopy = installPhase === 'idle' && state === 'available'
+    ? `Download Prime Novel ${release?.version ?? ''} and install it on this device.`
+    : message ?? updateInstallPhaseCopy(installPhase);
+
   const badge = statusBadge(state, result);
-  const statusCopy = state === 'downloading'
-    ? message ?? 'Downloading the update...'
-    : state === 'download-error'
-      ? message ?? 'The update download could not be completed.'
-      : updateStatusCopy(result ?? { state: state as UpdateCheckState, currentVersion: version, checkedAt: lastCheckedAt });
+  const statusCopy = updateStatusCopy(result ?? { state, currentVersion: version });
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -156,17 +127,61 @@ export default function AppUpdateScreen() {
           </View>
         ) : null}
 
-        {message && state !== 'error' && state !== 'download-error' ? <Text style={[styles.message, { color: colors.mutedForeground }]}>{message}</Text> : null}
+        {message && state !== 'error' ? <Text style={[styles.message, { color: colors.mutedForeground }]}>{message}</Text> : null}
 
         {state === 'available' ? (
-          <Pressable accessibilityRole="button" onPress={() => void downloadUpdate()} style={({ pressed }) => [styles.primaryAction, { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 }]}>
-            <Text style={[styles.primaryActionText, { color: colors.primaryForeground }]}>Download update {release?.version ? `(${release.version})` : ''}</Text>
-          </Pressable>
+          <View style={[styles.installCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.installTitle, { color: colors.foreground }]}>Update in the app</Text>
+            <Text style={[styles.installCopy, { color: colors.mutedForeground }]}>{installCopy}</Text>
+            {busy || installPhase === 'ready-to-install' || installPhase === 'installed' || installPhase === 'error' ? (
+              <View style={[styles.progressTrack, { backgroundColor: colors.secondary }]}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    {
+                      backgroundColor: installPhase === 'error' ? colors.destructive : colors.primary,
+                      width: `${Math.max(8, Math.round(installProgress * 100))}%`,
+                    },
+                  ]}
+                />
+              </View>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Download and install update"
+              disabled={busy}
+              onPress={() => void downloadAndInstall()}
+              style={({ pressed }) => [
+                styles.primaryAction,
+                {
+                  backgroundColor: colors.primary,
+                  opacity: busy ? 0.55 : pressed ? 0.82 : 1,
+                },
+              ]}
+            >
+              <Text style={[styles.primaryActionText, { color: colors.primaryForeground }]}>
+                {installPhase === 'preparing' || installPhase === 'downloading'
+                  ? 'Downloading update...'
+                  : installPhase === 'installing'
+                    ? 'Opening installer...'
+                    : installPhase === 'installed'
+                      ? 'Installer opened'
+                      : installPhase === 'error'
+                        ? 'Try install again'
+                        : 'Download and install'}
+              </Text>
+            </Pressable>
+          </View>
         ) : null}
-        <Pressable accessibilityRole="button" disabled={state === 'checking' || state === 'downloading'} onPress={() => void checkForUpdates()} style={({ pressed }) => [styles.secondaryAction, { borderColor: colors.border, opacity: state === 'checking' || state === 'downloading' ? 0.45 : pressed ? 0.72 : 1 }]}>
+
+        <Pressable accessibilityRole="button" disabled={state === 'checking' || busy} onPress={() => void checkForUpdates()} style={({ pressed }) => [styles.secondaryAction, { borderColor: colors.border, opacity: state === 'checking' || busy ? 0.45 : pressed ? 0.72 : 1 }]}>
           <Text style={[styles.secondaryActionText, { color: colors.foreground }]}>{state === 'checking' ? 'Checking for updates...' : 'Check for app updates'}</Text>
         </Pressable>
-        <Text style={[styles.helper, { color: colors.mutedForeground }]}>Android will ask you to approve the downloaded APK before installing it. Your library, reading progress, and downloads stay on the phone.</Text>
+        <Text style={[styles.helper, { color: colors.mutedForeground }]}>
+          {Platform.OS === 'android'
+            ? 'Android will ask you to approve the install. Your library, reading progress, and downloads stay on the phone.'
+            : 'After downloading, follow the install steps Apple provides for this release.'}
+        </Text>
         <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.backAction}>
           <Text style={[styles.backActionText, { color: colors.primary }]}>Back to More</Text>
         </Pressable>
@@ -189,6 +204,11 @@ const styles = StyleSheet.create({
   checkedAt: { fontFamily: 'Inter_400Regular', fontSize: 10 },
   notesCard: { borderWidth: 1, borderRadius: 18, padding: 17, gap: 8 },
   note: { fontFamily: 'Inter_400Regular', fontSize: 12, lineHeight: 18 },
+  installCard: { borderWidth: 1, borderRadius: 18, padding: 17, gap: 10 },
+  installTitle: { fontFamily: 'Georgia', fontSize: 18 },
+  installCopy: { fontFamily: 'Inter_400Regular', fontSize: 12, lineHeight: 18 },
+  progressTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
+  progressFill: { height: 6, borderRadius: 3 },
   message: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16 },
   primaryAction: { minHeight: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 },
   primaryActionText: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
