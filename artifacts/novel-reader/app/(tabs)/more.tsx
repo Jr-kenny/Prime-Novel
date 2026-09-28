@@ -6,25 +6,41 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { UtilityRow } from '@/components/UtilityRow';
 import { AndroidMoreAction } from '@/components/android-more-action';
 import { useColors } from '@/hooks/useColors';
-import { compareAppVersions, currentAppVersion, fetchAppRelease } from '@/utils/app-updates';
+import { currentAppVersion } from '@/utils/app-updates';
+import { runUpdateCheck, type UpdateCheckState } from '@/utils/update-check';
 
 export default function MoreScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const version = currentAppVersion();
+  const [updateState, setUpdateState] = useState<UpdateCheckState>('idle');
   const [availableVersion, setAvailableVersion] = useState<string>();
 
   useEffect(() => {
     let cancelled = false;
-    void fetchAppRelease()
-      .then((release) => {
-        if (!cancelled && compareAppVersions(release.version, version) > 0) setAvailableVersion(release.version);
+    void runUpdateCheck()
+      .then((result) => {
+        if (cancelled) return;
+        setUpdateState(result.state);
+        setAvailableVersion(result.availableVersion);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setUpdateState('error');
+      });
     return () => {
       cancelled = true;
     };
-  }, [version]);
+  }, []);
+
+  const updateDescription = updateState === 'checking'
+    ? 'Checking for updates...'
+    : updateState === 'available' && availableVersion
+      ? `Update available — Version ${availableVersion}`
+      : updateState === 'up-to-date'
+        ? `You're up to date · ${version}`
+        : updateState === 'error'
+          ? 'Unable to check for updates'
+          : `Prime Novel ${version} · Check for updates`;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -39,12 +55,12 @@ export default function MoreScreen() {
           <UtilityRow compact icon="grid" onPress={() => router.push('/view-settings')} showChevron={false} testID="more-view" title="View" />
           <UtilityRow
             compact
-            description={availableVersion ? `Prime Novel ${availableVersion} is ready · Tap to see what changed` : `Prime Novel ${version} · Check for updates`}
+            description={updateDescription}
             icon="download-cloud"
             onPress={() => router.push('/app-update')}
             showChevron={false}
             testID="more-app-updates"
-            title={availableVersion ? 'App update available' : 'App updates'}
+            title={updateState === 'available' ? 'App update available' : 'App updates'}
           />
           <UtilityRow compact icon="refresh-cw" onPress={() => router.push('/update-settings')} showChevron={false} testID="more-updates" title="Updates" />
           <UtilityRow compact icon="tool" onPress={() => router.push('/advanced')} showChevron={false} testID="more-advanced" title="Advanced" />
