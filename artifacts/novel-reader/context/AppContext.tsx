@@ -8,12 +8,14 @@ import { PRIME_SOURCE_REGISTRY } from '@/data/prime-sources';
 import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
 import { durableStorageWrite } from '@/utils/durable-storage';
 import { loadAppDatabaseState, persistAppDatabaseState } from '@/utils/persistent-database';
+import { DEFAULT_APP_ICON, normalizeAppIconId, type AppIconId } from '@/utils/app-icon';
 
 export type LibraryLayout = 'shelf' | 'grid';
 export type UpdateFrequency = 'off' | 'hourly' | 'daily';
 export type AppTheme = 'cream' | 'white' | 'dark';
 
 export type AppSettings = {
+  appIcon: AppIconId;
   appTheme: AppTheme;
   autoBookmarkFromShare: boolean;
   downloadConcurrency: number;
@@ -106,6 +108,7 @@ type AppContextValue = AppSnapshot & {
 };
 
 const defaultSettings: AppSettings = {
+  appIcon: DEFAULT_APP_ICON,
   appTheme: 'cream',
   autoBookmarkFromShare: true,
   downloadConcurrency: 3,
@@ -188,7 +191,12 @@ function normalizeSettings(stored: Partial<AppSettings>) {
     : storedFrequency === 'manual' || storedFrequency === 'off'
       ? 'off'
       : defaultSettings.updateFrequency;
-  return { ...defaultSettings, ...stored, updateFrequency };
+  return {
+    ...defaultSettings,
+    ...stored,
+    appIcon: normalizeAppIconId(stored.appIcon),
+    updateFrequency,
+  };
 }
 
 function normalizeSources(stored: SourceRecord[]) {
