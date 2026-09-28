@@ -1,5 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import * as Clipboard from 'expo-clipboard';
 import * as NavigationBar from 'expo-navigation-bar';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SystemUI from 'expo-system-ui';
@@ -36,7 +37,7 @@ import { useCatalog } from '@/context/CatalogContext';
 import { useColors } from '@/hooks/useColors';
 import { Book, ReaderFont, ReaderMode, ReaderPreferences, ReaderTheme, useReader } from '@/context/ReaderContext';
 import { getReaderFont, getReaderPalette, ReaderPalette } from '@/utils/reader-style';
-import { tokenizeParagraph } from '@/utils/word-highlights';
+import { tokenizeParagraph, formatChapterForCopy, formatHighlightsForCopy, highlightsForChapter } from '@/utils/word-highlights';
 import { WebLandingButton } from '@/components/WebLandingButton';
 
 const KEEP_AWAKE_TAG = 'prime-novel-reader';
@@ -376,10 +377,10 @@ function Paragraphs({
       {paragraphs.map((paragraph, index) => {
         const indentPrefix = preferences.paragraphIndent && index > 0 ? '\u2003\u2003' : '';
         const tokens = tokenizeParagraph(indentPrefix + paragraph);
-        const indentWordOffset = preferences.paragraphIndent && index > 0 ? 1 : 0;
         return (
           <Text
             key={`${keyPrefix}-${index}`}
+            selectable
             style={[
               styles.paragraph,
               {
@@ -393,7 +394,7 @@ function Paragraphs({
           >
             {tokens.map((token) => {
               if (!token.isWord) return token.text;
-              const wordIndex = Math.max(0, token.index - indentWordOffset);
+              const wordIndex = Math.max(0, token.index);
               const highlighted = isWordHighlighted(index, wordIndex);
               return (
                 <Text
@@ -965,6 +966,22 @@ export default function ReaderScreen() {
     ))
   );
 
+  const chapterHighlights = wordHighlights.filter((highlight) => (
+    highlight.bookId === activeBook.id && highlight.chapter === activeBook.chapter
+  ));
+
+  const copyHighlightedWords = async () => {
+    const text = formatHighlightsForCopy(chapterHighlights, paragraphsFor(activeBook.chapter));
+    if (!text) return;
+    await Clipboard.setStringAsync(text);
+  };
+
+  const copyChapterText = async () => {
+    const text = formatChapterForCopy(paragraphsFor(activeBook.chapter));
+    if (!text) return;
+    await Clipboard.setStringAsync(text);
+  };
+
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const handleReadingSurfaceClick = (event: MouseEvent) => {
@@ -1174,6 +1191,29 @@ export default function ReaderScreen() {
             <Text style={[styles.position, { color: palette.muted }]}>{activeBook.progress}%</Text>
             <Text style={[styles.modeLabel, { color: palette.muted }]}>{readerPreferences.mode === 'vertical' ? 'Continuous' : `Chapter ${activeBook.chapter}`}</Text>
             <Pressable
+              accessibilityLabel="Copy chapter text"
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={() => void copyChapterText()}
+              style={({ pressed }) => [styles.copyButton, { opacity: pressed ? 0.72 : 1 }]}
+              testID="reader-copy-chapter"
+            >
+              <Feather name="copy" size={16} color={palette.text} />
+            </Pressable>
+            {chapterHighlights.length > 0 ? (
+              <Pressable
+                accessibilityLabel={`Copy ${chapterHighlights.length} highlighted words`}
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={() => void copyHighlightedWords()}
+                style={({ pressed }) => [styles.copyButton, { backgroundColor: palette.accent, opacity: pressed ? 0.72 : 1 }]}
+                testID="reader-copy-highlights"
+              >
+                <Feather name="check" size={14} color={palette.background} />
+                <Text style={[styles.copyButtonLabel, { color: palette.background }]}>{chapterHighlights.length}</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
               accessibilityLabel="Reader settings"
               accessibilityRole="button"
               onPress={() => setSettingsOpen(true)}
@@ -1231,6 +1271,8 @@ const styles = StyleSheet.create({
   themeDot: { width: 28, height: 28, borderRadius: 14, borderWidth: 2 },
   position: { fontFamily: 'Inter_500Medium', fontSize: 11 },
   modeLabel: { fontFamily: 'Inter_400Regular', fontSize: 11, marginLeft: 'auto' },
+  copyButton: { minWidth: 32, height: 32, borderRadius: 16, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  copyButtonLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 11 },
   readerSettingsButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   settingsOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 20, justifyContent: 'flex-start' },
   settingsScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.2)' },
