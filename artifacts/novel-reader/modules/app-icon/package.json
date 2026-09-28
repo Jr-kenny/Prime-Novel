@@ -1,0 +1,9 @@
+{
+  "name": "prime-app-icon",
+  "version": "0.1.0",
+  "description": "Launcher icon switching for Prime Novel",
+  "license": "MIT",
+  "author": "Prime Novel",
+  "homepage": "https://github.com/Jr-kenny/Prime-Novel",
+  "main": "index.ts"
+}
