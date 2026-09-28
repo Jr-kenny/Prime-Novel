@@ -35,7 +35,8 @@
       "expo-camera",
       "expo-font",
       "expo-web-browser",
-      "./plugins/withAlternateAppIcons.js"
+      "./plugins/withAlternateAppIcons.js",
+      "./plugins/withInstallPackagesPermission.js"
     ],
     "experiments": {
       "baseUrl": "/app",
