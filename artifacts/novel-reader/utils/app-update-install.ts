@@ -3,15 +3,10 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import { Linking, Platform } from 'react-native';
 import { platformRelease, releaseUrl, type AppRelease } from './app-updates';
 import { createPreUpdateBackup } from './data-recovery';
+import { updateInstallPhaseCopy, type UpdateInstallPhase } from './update-install-phase';
 
-export type UpdateInstallPhase =
-  | 'idle'
-  | 'preparing'
-  | 'downloading'
-  | 'ready-to-install'
-  | 'installing'
-  | 'installed'
-  | 'error';
+export type { UpdateInstallPhase } from './update-install-phase';
+export { updateInstallPhaseCopy } from './update-install-phase';
 
 export type UpdateInstallProgress = {
   phase: UpdateInstallPhase;
@@ -31,25 +26,6 @@ const installerFlags = 1;
 function updateFilePath(version: string) {
   const safeVersion = version.replace(/[^0-9.]+/g, '-');
   return `${FileSystem.documentDirectory}prime-novel/updates/Prime-Novel-${safeVersion}.apk`;
-}
-
-export function updateInstallPhaseCopy(phase: UpdateInstallPhase): string {
-  switch (phase) {
-    case 'preparing':
-      return 'Preparing the update package...';
-    case 'downloading':
-      return 'Downloading the update...';
-    case 'ready-to-install':
-      return 'Update downloaded. Approve the install prompt to finish.';
-    case 'installing':
-      return 'Opening the system installer...';
-    case 'installed':
-      return 'The installer finished. Open the updated app when you are ready.';
-    case 'error':
-      return 'The update could not be installed.';
-    default:
-      return 'Ready to download and install.';
-  }
 }
 
 export async function downloadAndInstallUpdate(
