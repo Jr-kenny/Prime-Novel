@@ -71,7 +71,7 @@ export default function ChaptersScreen() {
     removeBook,
     toggleFavorite,
   } = useReader();
-  const { downloadAllChapters, downloads, removeDownload } = useCatalog();
+  const { downloadAllChapters, resumeDownloadJob, downloads, removeDownload, getDownloadJob } = useCatalog();
   const [chapterFilter, setChapterFilter] = useState<ChapterFilter>('all');
   const [filterOpen, setFilterOpen] = useState(false);
   const [jumpOpen, setJumpOpen] = useState(false);
@@ -230,15 +230,27 @@ export default function ChaptersScreen() {
     : undefined;
   const allChaptersDownloaded = Boolean(catalogNovel && activeBook.chapters?.length && activeBook.chapters.every((chapter) => downloads.some((download) => download.key === `${activeBook.sourceId}:${chapter.id}`)));
 
-  const saveAllChaptersOffline = async () => {
+  const downloadJob = catalogNovel ? getDownloadJob(catalogNovel.id) : undefined;
+  const resumableJob = downloadJob && downloadJob.status !== 'completed' && downloadJob.chapters.length > 0
+    ? downloadJob
+    : undefined;
+
+  const saveAllChaptersOffline = async (mode: 'all' | 'resume' = 'all') => {
     if (!catalogNovel || !activeBook.chapters?.length || bulkDownload) return;
     setNotice(undefined);
     setBulkDownload({ completed: 0, total: activeBook.chapters.length, failed: 0 });
-    const result = await downloadAllChapters(catalogNovel, activeBook.chapters, (completed, total, failed) => {
+    const run = mode === 'resume' ? resumeDownloadJob : downloadAllChapters;
+    const result = await run(catalogNovel, activeBook.chapters, (completed, total, failed) => {
       setBulkDownload({ completed, total, failed });
     });
     setBulkDownload(undefined);
-    setNotice(result.failed > 0 ? `${result.downloaded} chapters saved. ${result.failed} could not be downloaded.` : `${result.downloaded} chapters saved for offline reading.`);
+    if (result.failed > 0) {
+      setNotice(`${result.downloaded} chapters saved. ${result.failed} could not be downloaded. Resume to retry them.`);
+    } else if (result.downloaded > 0) {
+      setNotice(`${result.downloaded} chapters saved for offline reading.`);
+    } else {
+      setNotice('All requested chapters are already saved offline.');
+    }
   };
 
   const removeFromLibrary = () => {
@@ -262,10 +274,18 @@ export default function ChaptersScreen() {
         downloadBusy={Boolean(bulkDownload)}
         downloadComplete={allChaptersDownloaded}
         downloadDisabled={!catalogNovel}
-        downloadLabel={bulkDownload ? `${bulkDownload.completed}/${bulkDownload.total}` : allChaptersDownloaded ? 'Downloaded' : 'Download all'}
+        downloadLabel={
+          bulkDownload
+            ? `${bulkDownload.completed}/${bulkDownload.total}`
+            : allChaptersDownloaded
+              ? 'Downloaded'
+              : resumableJob
+                ? 'Resume download'
+                : 'Download all'
+        }
         favorite={Boolean(activeBook.favorite)}
         inLibrary
-        onDownloadPress={() => void saveAllChaptersOffline()}
+        onDownloadPress={() => void saveAllChaptersOffline(resumableJob ? 'resume' : 'all')}
         onFavoritePress={() => toggleFavorite(activeBook.id)}
         onLibraryPress={removeFromLibrary}
       />
