@@ -296,7 +296,7 @@ function ReaderSettingsPanel({
 
           <SettingsSection label="READER" palette={palette}>
             <ToggleRow
-              description="Hide the reading controls for an uninterrupted page."
+              description="Hide controls and system bars for distraction-free reading."
               label="Fullscreen"
               onValueChange={(value) => onChange({ fullscreen: value })}
               palette={palette}
