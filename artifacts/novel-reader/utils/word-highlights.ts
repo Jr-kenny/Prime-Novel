@@ -90,3 +90,46 @@ export function highlightsForChapter(
 ): WordHighlight[] {
   return highlights.filter((item) => item.bookId === bookId && item.chapter === chapter);
 }
+
+export function formatHighlightsForCopy(
+  highlights: WordHighlight[],
+  paragraphs: string[],
+): string {
+  const ordered = [...highlights].sort((left, right) => (
+    left.paragraphIndex - right.paragraphIndex || left.wordIndex - right.wordIndex
+  ));
+
+  const byParagraph = new Map<number, WordHighlight[]>();
+  ordered.forEach((item) => {
+    const list = byParagraph.get(item.paragraphIndex) ?? [];
+    list.push(item);
+    byParagraph.set(item.paragraphIndex, list);
+  });
+
+  const lines: string[] = [];
+  [...byParagraph.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .forEach(([paragraphIndex, words]) => {
+      const paragraph = paragraphs[paragraphIndex] ?? '';
+      const tokens = tokenizeParagraph(paragraph);
+      const selected = new Set(words.map((word) => word.wordIndex));
+      let line = '';
+      tokens.forEach((token) => {
+        if (!token.isWord) {
+          if (selected.size === 0 || line.length > 0) line += token.text;
+          return;
+        }
+        if (selected.has(token.index)) {
+          line += token.text;
+        }
+      });
+      const trimmed = line.replace(/\s+/g, ' ').trim();
+      if (trimmed) lines.push(trimmed);
+    });
+
+  return lines.join('\n');
+}
+
+export function formatChapterForCopy(paragraphs: string[]): string {
+  return paragraphs.join('\n\n');
+}
