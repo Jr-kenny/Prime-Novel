@@ -15,12 +15,6 @@ function ensureDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
-function copyIcon(sourceRoot, destination) {
-  const source = path.join(sourceRoot, 'assets/icons', path.basename(destination));
-  ensureDir(destination);
-  fs.copyFileSync(source, destination);
-}
-
 function withAndroidIcons(config) {
   return withDangerousMod(config, [
     'android',
