@@ -36,6 +36,7 @@ import { useCatalog } from '@/context/CatalogContext';
 import { useColors } from '@/hooks/useColors';
 import { Book, ReaderFont, ReaderMode, ReaderPreferences, ReaderTheme, useReader } from '@/context/ReaderContext';
 import { getReaderFont, getReaderPalette, ReaderPalette } from '@/utils/reader-style';
+import { tokenizeParagraph } from '@/utils/word-highlights';
 import { WebLandingButton } from '@/components/WebLandingButton';
 
 const KEEP_AWAKE_TAG = 'prime-novel-reader';
@@ -356,34 +357,61 @@ function Paragraphs({
   palette,
   startOffset = 0,
   keyPrefix,
+  onToggleWord,
+  isWordHighlighted,
+  onWordTap,
 }: {
   paragraphs: string[];
   preferences: ReaderPreferences;
   palette: ReaderPalette;
   startOffset?: number;
   keyPrefix: string;
+  onToggleWord: (paragraphIndex: number, wordIndex: number, word: string) => void;
+  isWordHighlighted: (paragraphIndex: number, wordIndex: number) => boolean;
+  onWordTap?: () => void;
 }) {
   const readerFont = getReaderFont(preferences.font);
   return (
     <>
-      {paragraphs.map((paragraph, index) => (
-        <Text
-          key={`${keyPrefix}-${index}`}
-          style={[
-            styles.paragraph,
-            {
-              color: palette.text,
-              fontFamily: readerFont.body,
-              fontSize: preferences.textSize,
-              lineHeight: preferences.lineHeight,
-              marginTop: index === 0 && startOffset === 0 ? 28 : preferences.paragraphSpacing,
-            },
-          ]}
-        >
-          {preferences.paragraphIndent && index > 0 ? '\u2003\u2003' : ''}
-          {paragraph}
-        </Text>
-      ))}
+      {paragraphs.map((paragraph, index) => {
+        const indentPrefix = preferences.paragraphIndent && index > 0 ? '\u2003\u2003' : '';
+        const tokens = tokenizeParagraph(indentPrefix + paragraph);
+        const indentWordOffset = preferences.paragraphIndent && index > 0 ? 1 : 0;
+        return (
+          <Text
+            key={`${keyPrefix}-${index}`}
+            style={[
+              styles.paragraph,
+              {
+                color: palette.text,
+                fontFamily: readerFont.body,
+                fontSize: preferences.textSize,
+                lineHeight: preferences.lineHeight,
+                marginTop: index === 0 && startOffset === 0 ? 28 : preferences.paragraphSpacing,
+              },
+            ]}
+          >
+            {tokens.map((token) => {
+              if (!token.isWord) return token.text;
+              const wordIndex = Math.max(0, token.index - indentWordOffset);
+              const highlighted = isWordHighlighted(index, wordIndex);
+              return (
+                <Text
+                  key={`${keyPrefix}-${index}-${token.index}`}
+                  onPress={() => {
+                    onWordTap?.();
+                    onToggleWord(index, wordIndex, token.text);
+                  }}
+                  suppressHighlighting
+                  style={highlighted ? { backgroundColor: palette.accent, color: palette.background, borderRadius: 3 } : undefined}
+                >
+                  {token.text}
+                </Text>
+              );
+            })}
+          </Text>
+        );
+      })}
     </>
   );
 }
@@ -407,6 +435,8 @@ export default function ReaderScreen() {
     markChapterRead,
     markChapterUnread,
     isChapterRead,
+    toggleWordHighlight,
+    wordHighlights,
     hydrated,
   } = useReader();
   const activeBook = selectedBook ?? emptyBook;
@@ -436,6 +466,7 @@ export default function ReaderScreen() {
   const restoredHorizontalPositionsRef = useRef<Set<string>>(new Set());
   const restoringHorizontalPositionsRef = useRef<Set<string>>(new Set());
   const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
+  const wordInteractionRef = useRef(false);
   const hasScrolledRef = useRef(false);
   const advancingRef = useRef(false);
   const suppressVerticalSaveRef = useRef(false);
@@ -903,16 +934,45 @@ export default function ReaderScreen() {
 
   const handleReadingTouchEnd = (event: GestureResponderEvent) => {
     if (Platform.OS === 'web') return;
+    if (wordInteractionRef.current) {
+      wordInteractionRef.current = false;
+      return;
+    }
     const start = touchStartRef.current;
     const moved = Math.hypot(event.nativeEvent.pageX - start.x, event.nativeEvent.pageY - start.y) > 12;
     const wasTap = Date.now() - start.time < 450;
     if (!settingsOpen && wasTap && !moved) setControlsVisible((visible) => !visible);
   };
 
+  const onToggleWord = (paragraphIndex: number, wordIndex: number, word: string) => {
+    if (!hasActiveBook) return;
+    wordInteractionRef.current = true;
+    toggleWordHighlight({
+      bookId: activeBook.id,
+      chapter: activeBook.chapter,
+      paragraphIndex,
+      wordIndex,
+      word,
+    });
+  };
+
+  const isChapterWordHighlighted = (paragraphIndex: number, wordIndex: number) => (
+    wordHighlights.some((highlight) => (
+      highlight.bookId === activeBook.id
+      && highlight.chapter === activeBook.chapter
+      && highlight.paragraphIndex === paragraphIndex
+      && highlight.wordIndex === wordIndex
+    ))
+  );
+
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const handleReadingSurfaceClick = (event: MouseEvent) => {
       if (settingsOpen || !(event.target instanceof Element)) return;
+      if (wordInteractionRef.current) {
+        wordInteractionRef.current = false;
+        return;
+      }
       const readingSurface = event.target.closest('[data-testid="reader-vertical-scroll"], [data-testid="reader-horizontal-scroll"]');
       if (readingSurface) setControlsVisible((visible) => !visible);
     };
@@ -1005,7 +1065,16 @@ export default function ReaderScreen() {
               <Text style={[styles.chapterLabel, { color: palette.accent }]}>CHAPTER {chapter}</Text>
               <Text style={[styles.chapterTitle, { color: palette.text, fontFamily: getReaderFont(readerPreferences.font).heading, fontSize: readerPreferences.textSize + 14, lineHeight: readerPreferences.textSize + 20 }]}>{titleFor(chapter)}</Text>
               <Text style={[styles.byline, { color: palette.muted }]}>{activeBook.author} · 8 min read</Text>
-              {chapterStatus(chapter) ? <Text style={[styles.chapterLoading, { color: palette.muted }]}>{chapterStatus(chapter)}</Text> : <Paragraphs paragraphs={paragraphsFor(chapter)} preferences={readerPreferences} palette={palette} keyPrefix={`${activeBook.id}-${chapter}`} />}
+              {chapterStatus(chapter) ? <Text style={[styles.chapterLoading, { color: palette.muted }]}>{chapterStatus(chapter)}</Text> : (
+                <Paragraphs
+                  paragraphs={paragraphsFor(chapter)}
+                  preferences={readerPreferences}
+                  palette={palette}
+                  keyPrefix={`${activeBook.id}-${chapter}`}
+                  onToggleWord={onToggleWord}
+                  isWordHighlighted={isChapterWordHighlighted}
+                />
+              )}
             </View>
           ))}
           {!hasNextChapter ? (
@@ -1055,7 +1124,16 @@ export default function ReaderScreen() {
                   <Text style={[styles.chapterLabel, { color: palette.accent }]}>CHAPTER {chapter}</Text>
                   <Text style={[styles.chapterTitle, { color: palette.text, fontFamily: getReaderFont(readerPreferences.font).heading, fontSize: readerPreferences.textSize + 14, lineHeight: readerPreferences.textSize + 20 }]}>{titleFor(chapter)}</Text>
                   <Text style={[styles.byline, { color: palette.muted }]}>{activeBook.author} · 8 min read</Text>
-                  {chapterStatus(chapter) ? <Text style={[styles.chapterLoading, { color: palette.muted }]}>{chapterStatus(chapter)}</Text> : <Paragraphs paragraphs={paragraphsFor(chapter)} preferences={readerPreferences} palette={palette} keyPrefix={`${activeBook.id}-horizontal-${chapter}`} />}
+                  {chapterStatus(chapter) ? <Text style={[styles.chapterLoading, { color: palette.muted }]}>{chapterStatus(chapter)}</Text> : (
+                    <Paragraphs
+                      paragraphs={paragraphsFor(chapter)}
+                      preferences={readerPreferences}
+                      palette={palette}
+                      keyPrefix={`${activeBook.id}-horizontal-${chapter}`}
+                      onToggleWord={onToggleWord}
+                      isWordHighlighted={isChapterWordHighlighted}
+                    />
+                  )}
                   {chapter === activeBook.totalChapters ? (
                     <View style={[styles.endNote, { borderTopColor: palette.border }]}>
                       <Feather name="check" size={17} color={palette.accent} />
