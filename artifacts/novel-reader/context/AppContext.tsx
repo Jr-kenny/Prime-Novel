@@ -10,6 +10,13 @@ import { durableStorageWrite } from '@/utils/durable-storage';
 import { loadAppDatabaseState, persistAppDatabaseState } from '@/utils/persistent-database';
 import { DEFAULT_APP_ICON, normalizeAppIconId, type AppIconId } from '@/utils/app-icon';
 import { applyAppIcon, readActiveAppIcon } from '@/utils/app-icon-switch';
+import { loadReadingStats, saveReadingStats } from '@/utils/reading-stats-storage';
+import {
+  recordChaptersRead,
+  recordReadingSession as recordReadingSessionStat,
+  recordReadingTime,
+  type ReadingStatsSnapshot,
+} from '@/utils/reading-stats';
 
 export type LibraryLayout = 'shelf' | 'grid';
 export type UpdateFrequency = 'off' | 'hourly' | 'daily';
@@ -99,6 +106,11 @@ type AppContextValue = AppSnapshot & {
   recordHistory: (entry: Omit<HistoryEntry, 'id' | 'openedAt'>) => void;
   recordRecentSearch: (query: string) => void;
   recordReadingSession: (bookId: string, durationMs: number, words: number) => void;
+  readingStats: ReadingStatsSnapshot;
+  beginReadingVisit: (bookId: string, bookTitle?: string) => void;
+  endReadingVisit: () => void;
+  accumulateReadingTime: (bookId: string, bookTitle: string | undefined, durationMs: number) => void;
+  recordChaptersReadForBook: (bookId: string, bookTitle: string | undefined, chapterCount?: number) => void;
   removeRepository: (repositoryId: string) => void;
   removeSource: (sourceId: string) => void;
   setSetting: <Key extends keyof AppSettings>(key: Key, value: AppSettings[Key]) => void;
@@ -232,6 +244,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [readingSessions, setReadingSessions] = useState<ReadingSession[]>([]);
+  const [readingStats, setReadingStats] = useState<ReadingStatsSnapshot>({ days: [], novels: [] });
+  const readingStatsRef = useRef<ReadingStatsSnapshot>({ days: [], novels: [] });
+  const activeVisitRef = useRef<{ bookId: string; bookTitle?: string; startedAt: number } | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const launchSyncStarted = useRef(false);
   const storageWriteRef = useRef<Promise<void>>(Promise.resolve());
@@ -305,6 +320,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .then(() => setHydrated(true))
       .catch(() => {
         hydratedRef.current = false;
+      });
+
+    void loadReadingStats()
+      .then((stats) => {
+        readingStatsRef.current = stats;
+        setReadingStats(stats);
+      })
+      .catch(() => {
+        const empty = { days: [], novels: [] };
+        readingStatsRef.current = empty;
+        setReadingStats(empty);
       });
   }, []);
 
@@ -575,6 +601,66 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, [persist]);
 
+  const commitReadingStats = useCallback((next: ReadingStatsSnapshot) => {
+    readingStatsRef.current = next;
+    setReadingStats(next);
+    void saveReadingStats(next).catch(() => {});
+  }, []);
+
+  const beginReadingVisit = useCallback((bookId: string, bookTitle?: string) => {
+    if (activeVisitRef.current?.bookId === bookId) return;
+    if (activeVisitRef.current) {
+      const previous = activeVisitRef.current;
+      const durationMs = Date.now() - previous.startedAt;
+      commitReadingStats(recordReadingTime(recordReadingSessionStat(readingStatsRef.current, {
+        bookId: previous.bookId,
+        bookTitle: previous.bookTitle,
+      }), {
+        bookId: previous.bookId,
+        bookTitle: previous.bookTitle,
+        durationMs,
+      }));
+    }
+    commitReadingStats(recordReadingSessionStat(readingStatsRef.current, { bookId, bookTitle }));
+    activeVisitRef.current = { bookId, bookTitle, startedAt: Date.now() };
+  }, [commitReadingStats]);
+
+  const endReadingVisit = useCallback(() => {
+    const active = activeVisitRef.current;
+    if (!active) return;
+    activeVisitRef.current = null;
+    const durationMs = Date.now() - active.startedAt;
+    commitReadingStats(recordReadingTime(readingStatsRef.current, {
+      bookId: active.bookId,
+      bookTitle: active.bookTitle,
+      durationMs,
+    }));
+  }, [commitReadingStats]);
+
+  const accumulateReadingTime = useCallback((bookId: string, bookTitle: string | undefined, durationMs: number) => {
+    if (durationMs <= 0) return;
+    commitReadingStats(recordReadingTime(readingStatsRef.current, {
+      bookId,
+      bookTitle,
+      durationMs,
+    }));
+  }, [commitReadingStats]);
+
+  const recordChaptersReadForBook = useCallback((bookId: string, bookTitle: string | undefined, chapterCount = 1) => {
+    if (chapterCount <= 0) return;
+    commitReadingStats(recordChaptersRead(readingStatsRef.current, {
+      bookId,
+      bookTitle,
+      chapterCount,
+    }));
+  }, [commitReadingStats]);
+
+  useEffect(() => {
+    return () => {
+      endReadingVisit();
+    };
+  }, [endReadingVisit]);
+
   const value = useMemo<AppContextValue>(() => ({
     settings,
     sources,
@@ -591,6 +677,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     recordHistory,
     recordRecentSearch,
     recordReadingSession,
+    readingStats,
+    beginReadingVisit,
+    endReadingVisit,
+    accumulateReadingTime,
+    recordChaptersReadForBook,
     removeRepository,
     removeSource,
     setSetting,
@@ -598,7 +689,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     toggleRepository,
     toggleSource,
     hydrated,
-  }), [addRepository, addShareLink, availableSources, clearSourceCache, hydrated, history, installSource, recordHistory, recordRecentSearch, recordReadingSession, recentSearches, removeRepository, removeSource, readingSessions, repositories, setSetting, settings, sharedLinks, sources, syncSources, toggleRepository, toggleSource]);
+  }), [accumulateReadingTime, addRepository, addShareLink, availableSources, beginReadingVisit, clearSourceCache, endReadingVisit, hydrated, history, installSource, readingStats, recordChaptersReadForBook, recordHistory, recordRecentSearch, recordReadingSession, recentSearches, removeRepository, removeSource, readingSessions, repositories, setSetting, settings, sharedLinks, sources, syncSources, toggleRepository, toggleSource]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
