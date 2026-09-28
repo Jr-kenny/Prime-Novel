@@ -64,6 +64,7 @@
     "expo-file-system": "~19.0.24",
     "expo-intent-launcher": "~13.0.8",
     "expo-keep-awake": "~15.0.8",
+    "expo-modules-core": "3.0.30",
     "expo-screen-orientation": "~9.0.9",
     "expo-sqlite": "~16.0.10",
     "htmlparser2": "^9.1.0"
