@@ -9,9 +9,13 @@ dist/
 web-build/
 expo-env.d.ts
 
-# Native
-ios/
-android/
+# Native prebuild output
+/android/
+/ios/
+!modules/**/android/
+!modules/**/android/**
+!modules/**/ios/
+!modules/**/ios/**
 *.orig.*
 *.jks
 *.p8
