@@ -1,5 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import * as NavigationBar from 'expo-navigation-bar';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SystemUI from 'expo-system-ui';
 import { StatusBar } from 'expo-status-bar';
@@ -447,9 +448,10 @@ export default function ReaderScreen() {
   const hasNextChapter = activeBook.chapter < activeBook.totalChapters;
   const isCurrentChapterRead = isChapterRead(activeBook.chapter);
   const chromeVisible = controlsVisible || settingsOpen;
+  const immersiveMode = !chromeVisible;
   const chromeTopHeight = insets.top + (Platform.OS === 'web' ? 40 : 10) + 23 + 12;
-  const readerContentTopPadding = chromeTopHeight + 28;
-  const readerContentBottomPadding = insets.bottom + 110;
+  const readerContentTopPadding = immersiveMode ? Math.max(12, insets.top * 0.35) + 18 : chromeTopHeight + 28;
+  const readerContentBottomPadding = immersiveMode ? Math.max(12, insets.bottom * 0.35) + 28 : insets.bottom + 110;
   const isRemoteBook = Boolean(activeBook.sourceUrl);
 
   useEffect(() => {
@@ -630,13 +632,34 @@ export default function ReaderScreen() {
   }, [palette.background]);
 
   useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    void (async () => {
+      try {
+        if (immersiveMode) {
+          await NavigationBar.setVisibilityAsync('hidden');
+          await NavigationBar.setBehaviorAsync('overlay-swipe');
+        } else {
+          await NavigationBar.setVisibilityAsync('visible');
+          await NavigationBar.setBehaviorAsync('inset-swipe');
+        }
+      } catch {
+        // Navigation bar control is best-effort across Android versions.
+      }
+    })();
+    return () => {
+      if (Platform.OS !== 'android') return;
+      void NavigationBar.setVisibilityAsync('visible').catch(() => {});
+    };
+  }, [immersiveMode]);
+
+  useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
-    if (readerPreferences.fullscreen) {
+    if (immersiveMode) {
       void document.documentElement.requestFullscreen?.().catch(() => {});
     } else if (document.fullscreenElement) {
       void document.exitFullscreen?.().catch(() => {});
     }
-  }, [readerPreferences.fullscreen]);
+  }, [immersiveMode]);
 
   useEffect(() => {
     if (!readerPreferences.keepScreenAwake) return;
@@ -901,7 +924,12 @@ export default function ReaderScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: palette.background }]}>
-      <StatusBar backgroundColor={palette.background} hidden={readerPreferences.fullscreen} style={palette.statusBarStyle} />
+      <StatusBar
+        backgroundColor={palette.background}
+        hidden={immersiveMode}
+        style={palette.statusBarStyle}
+        translucent={immersiveMode}
+      />
       <Animated.View
         pointerEvents={chromeVisible ? 'auto' : 'none'}
         style={[
