@@ -9,6 +9,7 @@ import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-
 import { durableStorageWrite } from '@/utils/durable-storage';
 import { loadAppDatabaseState, persistAppDatabaseState } from '@/utils/persistent-database';
 import { DEFAULT_APP_ICON, normalizeAppIconId, type AppIconId } from '@/utils/app-icon';
+import { applyAppIcon, readActiveAppIcon } from '@/utils/app-icon-switch';
 
 export type LibraryLayout = 'shelf' | 'grid';
 export type UpdateFrequency = 'off' | 'hourly' | 'daily';
@@ -334,6 +335,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
   }, [persist]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const active = await readActiveAppIcon();
+        if (cancelled) return;
+        const preferred = normalizeAppIconId(settings.appIcon);
+        if (active !== preferred) {
+          await applyAppIcon(preferred);
+        }
+      } catch {
+        // Icon sync is best-effort. The stored preference remains the source of truth.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated, settings.appIcon]);
 
   const addRepository = useCallback((rawUrl: string, customName?: string) => {
     if (process.env.EXPO_OS !== 'android') return false;
