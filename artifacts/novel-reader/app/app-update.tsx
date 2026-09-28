@@ -8,10 +8,17 @@ import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SubscreenHeader } from '@/components/SubscreenHeader';
 import { useColors } from '@/hooks/useColors';
-import { compareAppVersions, currentAppVersion, fetchAppRelease, platformRelease, releaseUrl, type AppRelease } from '@/utils/app-updates';
+import { platformRelease, releaseUrl, type AppRelease } from '@/utils/app-updates';
+import {
+  loadLastUpdateCheck,
+  runUpdateCheck,
+  updateStatusCopy,
+  type UpdateCheckResult,
+  type UpdateCheckState,
+} from '@/utils/update-check';
 import { createPreUpdateBackup } from '@/utils/data-recovery';
 
-type UpdateState = 'idle' | 'checking' | 'current' | 'available' | 'error';
+type ScreenState = UpdateCheckState | 'downloading' | 'download-error';
 
 const installerFlags = 1;
 
@@ -19,29 +26,59 @@ function installerAction() {
   return 'android.intent.action.VIEW';
 }
 
+function statusBadge(state: ScreenState, result?: UpdateCheckResult): { label: string; tone: 'neutral' | 'positive' | 'warning' | 'danger' } {
+  switch (state) {
+    case 'checking':
+      return { label: 'Checking for updates...', tone: 'neutral' };
+    case 'downloading':
+      return { label: 'Downloading update...', tone: 'neutral' };
+    case 'up-to-date':
+      return { label: "You're up to date", tone: 'positive' };
+    case 'available':
+      return { label: `Update available — Version ${result?.availableVersion ?? 'new'}`, tone: 'warning' };
+    case 'download-error':
+      return { label: 'Update download failed', tone: 'danger' };
+    case 'error':
+      return { label: 'Unable to check for updates', tone: 'danger' };
+    default:
+      return { label: 'Ready to check', tone: 'neutral' };
+  }
+}
+
 export default function AppUpdateScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const [state, setState] = useState<UpdateState>('idle');
+  const [state, setState] = useState<ScreenState>('idle');
+  const [result, setResult] = useState<UpdateCheckResult>();
   const [release, setRelease] = useState<AppRelease>();
   const [message, setMessage] = useState<string>();
-  const version = Constants.expoConfig?.version ?? currentAppVersion();
+  const [lastCheckedAt, setLastCheckedAt] = useState<number | undefined>();
+  const version = Constants.expoConfig?.version ?? result?.currentVersion ?? '1.0.0';
 
   const checkForUpdates = useCallback(async () => {
     setState('checking');
     setMessage(undefined);
-    try {
-      const nextRelease = await fetchAppRelease();
-      setRelease(nextRelease);
-      setState(compareAppVersions(nextRelease.version, version) > 0 ? 'available' : 'current');
-    } catch (error) {
-      setState('error');
-      setMessage(error instanceof Error ? error.message : 'The update check could not be completed.');
+    const next = await runUpdateCheck();
+    setResult(next);
+    setRelease(next.release);
+    setLastCheckedAt(next.checkedAt);
+    setState(next.state);
+    if (next.state === 'error') {
+      setMessage(next.errorMessage);
     }
-  }, [version]);
+  }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    void loadLastUpdateCheck()
+      .then((last) => {
+        if (!cancelled && last?.checkedAt) setLastCheckedAt(last.checkedAt);
+      })
+      .catch(() => {});
     void checkForUpdates();
+    return () => {
+      cancelled = true;
+    };
   }, [checkForUpdates]);
 
   const downloadUpdate = async () => {
@@ -49,6 +86,7 @@ export default function AppUpdateScreen() {
     const target = platformRelease(release);
     if (!target?.url) {
       setMessage(Platform.OS === 'ios' ? 'The iOS release is not available yet.' : 'No download is attached to this release.');
+      setState('download-error');
       return;
     }
 
@@ -58,16 +96,16 @@ export default function AppUpdateScreen() {
       return;
     }
 
-    setState('checking');
+    setState('downloading');
     setMessage('Downloading the update');
     try {
       await createPreUpdateBackup();
       const directory = `${FileSystem.documentDirectory}prime-novel/updates/`;
       await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
       const destination = `${directory}Prime-Novel-${release.version}.apk`;
-      const result = await FileSystem.downloadAsync(url, destination);
-      if (result.status < 200 || result.status >= 300) throw new Error(`Download returned ${result.status}.`);
-      const contentUri = await FileSystem.getContentUriAsync(result.uri);
+      const downloadResult = await FileSystem.downloadAsync(url, destination);
+      if (downloadResult.status < 200 || downloadResult.status >= 300) throw new Error(`Download returned ${downloadResult.status}.`);
+      const contentUri = await FileSystem.getContentUriAsync(downloadResult.uri);
       await IntentLauncher.startActivityAsync(installerAction(), {
         data: contentUri,
         type: 'application/vnd.android.package-archive',
@@ -76,20 +114,17 @@ export default function AppUpdateScreen() {
       setState('available');
       setMessage('Android opened the installer. Approve the update there.');
     } catch (error) {
-      setState('available');
+      setState('download-error');
       setMessage(error instanceof Error ? error.message : 'The update download could not be completed.');
     }
   };
 
-  const statusCopy = state === 'checking'
-    ? 'Checking Prime Novel releases'
-    : state === 'current'
-      ? `You’re running the latest release, ${version}.`
-      : state === 'available'
-        ? `Prime Novel ${release?.version ?? 'new'} is ready to download.`
-        : state === 'error'
-          ? message ?? 'The update check could not be completed.'
-          : 'Prime Novel checks for a newer release when you open this screen.';
+  const badge = statusBadge(state, result);
+  const statusCopy = state === 'downloading'
+    ? message ?? 'Downloading the update...'
+    : state === 'download-error'
+      ? message ?? 'The update download could not be completed.'
+      : updateStatusCopy(result ?? { state: state as UpdateCheckState, currentVersion: version, checkedAt: lastCheckedAt });
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -102,7 +137,15 @@ export default function AppUpdateScreen() {
           <View style={styles.versionCopy}>
             <Text style={[styles.cardLabel, { color: colors.mutedForeground }]}>CURRENT VERSION</Text>
             <Text style={[styles.version, { color: colors.foreground }]}>Prime Novel {version}</Text>
+            <View style={[styles.badge, { backgroundColor: badge.tone === 'positive' ? colors.secondary : badge.tone === 'danger' ? colors.destructive : colors.secondary }]}>
+              <Text style={[styles.badgeText, { color: badge.tone === 'danger' ? colors.destructiveForeground : colors.secondaryForeground }]}>{badge.label}</Text>
+            </View>
             <Text style={[styles.cardCopy, { color: colors.mutedForeground }]}>{statusCopy}</Text>
+            {lastCheckedAt ? (
+              <Text style={[styles.checkedAt, { color: colors.mutedForeground }]}>
+                Last checked {new Date(lastCheckedAt).toLocaleString()}
+              </Text>
+            ) : null}
           </View>
         </View>
 
@@ -113,15 +156,15 @@ export default function AppUpdateScreen() {
           </View>
         ) : null}
 
-        {message && state !== 'error' ? <Text style={[styles.message, { color: colors.mutedForeground }]}>{message}</Text> : null}
+        {message && state !== 'error' && state !== 'download-error' ? <Text style={[styles.message, { color: colors.mutedForeground }]}>{message}</Text> : null}
 
         {state === 'available' ? (
           <Pressable accessibilityRole="button" onPress={() => void downloadUpdate()} style={({ pressed }) => [styles.primaryAction, { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 }]}>
-            <Text style={[styles.primaryActionText, { color: colors.primaryForeground }]}>Download update</Text>
+            <Text style={[styles.primaryActionText, { color: colors.primaryForeground }]}>Download update {release?.version ? `(${release.version})` : ''}</Text>
           </Pressable>
         ) : null}
-        <Pressable accessibilityRole="button" disabled={state === 'checking'} onPress={() => void checkForUpdates()} style={({ pressed }) => [styles.secondaryAction, { borderColor: colors.border, opacity: state === 'checking' ? 0.45 : pressed ? 0.72 : 1 }]}>
-          <Text style={[styles.secondaryActionText, { color: colors.foreground }]}>{state === 'checking' ? 'Checking' : 'Check for app updates'}</Text>
+        <Pressable accessibilityRole="button" disabled={state === 'checking' || state === 'downloading'} onPress={() => void checkForUpdates()} style={({ pressed }) => [styles.secondaryAction, { borderColor: colors.border, opacity: state === 'checking' || state === 'downloading' ? 0.45 : pressed ? 0.72 : 1 }]}>
+          <Text style={[styles.secondaryActionText, { color: colors.foreground }]}>{state === 'checking' ? 'Checking for updates...' : 'Check for app updates'}</Text>
         </Pressable>
         <Text style={[styles.helper, { color: colors.mutedForeground }]}>Android will ask you to approve the downloaded APK before installing it. Your library, reading progress, and downloads stay on the phone.</Text>
         <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.backAction}>
@@ -137,10 +180,13 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 22, gap: 14 },
   versionCard: { borderWidth: 1, borderRadius: 18, padding: 18, flexDirection: 'row', gap: 13, alignItems: 'center' },
   versionIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  versionCopy: { flex: 1, gap: 4 },
+  versionCopy: { flex: 1, gap: 6 },
   cardLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 9, letterSpacing: 1.3 },
   version: { fontFamily: 'Georgia', fontSize: 20 },
+  badge: { alignSelf: 'flex-start', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
+  badgeText: { fontFamily: 'Inter_600SemiBold', fontSize: 10 },
   cardCopy: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16 },
+  checkedAt: { fontFamily: 'Inter_400Regular', fontSize: 10 },
   notesCard: { borderWidth: 1, borderRadius: 18, padding: 17, gap: 8 },
   note: { fontFamily: 'Inter_400Regular', fontSize: 12, lineHeight: 18 },
   message: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16 },
