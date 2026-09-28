@@ -28,7 +28,7 @@ class AppIconModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("AppIcon")
 
-    Function("setAppIcon") { iconId: String? ->
+    AsyncFunction("setAppIcon") { iconId: String? ->
       val context = requireNotNull(appContext.reactContext) { "React context is unavailable." }
       val resolved = if (iconId.isNullOrBlank()) "classic" else iconId
       if (resolved !in supportedIcons) {
@@ -49,7 +49,7 @@ class AppIconModule : Module() {
         .putString("iconId", resolved)
         .apply()
 
-      resolved != "classic"
+      true
     }
 
     Function("getAppIcon") {

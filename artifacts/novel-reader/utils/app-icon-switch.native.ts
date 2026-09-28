@@ -29,7 +29,7 @@ export async function applyAppIcon(iconId: AppIconId): Promise<AppIconSwitchResu
   }
   try {
     const applied = await module.setAppIcon(iconId === DEFAULT_APP_ICON ? null : iconId);
-    return { applied: Boolean(applied) };
+    return { applied: applied !== false };
   } catch (error) {
     return {
       applied: false,

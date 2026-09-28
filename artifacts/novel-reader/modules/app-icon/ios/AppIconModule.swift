@@ -23,7 +23,7 @@ public class AppIconModule: Module {
               continuation.resume(throwing: error)
               return
             }
-            continuation.resume(returning: resolved != self.classicIconName)
+            continuation.resume(returning: true)
           }
         }
       }
