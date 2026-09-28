@@ -1,8 +1,11 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AppIconPicker } from '@/components/AppIconPicker';
 import { SubscreenHeader } from '@/components/SubscreenHeader';
 import { useApp } from '@/context/AppContext';
 import { useColors } from '@/hooks/useColors';
+import type { AppIconId } from '@/utils/app-icon';
+import { applyAppIcon } from '@/utils/app-icon-switch';
 
 function Choice({ label, selected, onPress, dot }: { label: string; selected: boolean; onPress: () => void; dot?: string }) {
   const colors = useColors();
@@ -19,6 +22,14 @@ export default function ViewSettingsScreen() {
   const insets = useSafeAreaInsets();
   const { settings, setSetting } = useApp();
 
+  const handleChangeAppIcon = async (iconId: AppIconId) => {
+    setSetting('appIcon', iconId);
+    const result = await applyAppIcon(iconId);
+    if (!result.applied && result.error && Platform.OS !== 'web') {
+      Alert.alert('App icon', result.error);
+    }
+  };
+
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <SubscreenHeader title="View" />
@@ -31,6 +42,11 @@ export default function ViewSettingsScreen() {
           <Choice label="Dark" selected={settings.appTheme === 'dark'} onPress={() => setSetting('appTheme', 'dark')} dot="#171614" />
         </View>
         <Text style={[styles.hint, { color: colors.mutedForeground }]}>Choose the appearance used throughout Prime Novel.</Text>
+
+        <Text style={[styles.section, styles.iconSection, { color: colors.mutedForeground }]}>APP ICON</Text>
+        <Text style={[styles.label, { color: colors.foreground }]}>Home screen icon</Text>
+        <AppIconPicker value={settings.appIcon} onChange={(iconId) => void handleChangeAppIcon(iconId)} />
+        <Text style={[styles.hint, { color: colors.mutedForeground }]}>Your selection is saved and applied to the launcher icon on this device.</Text>
 
         <Text style={[styles.section, styles.librarySection, { color: colors.mutedForeground }]}>LIBRARY</Text>
         <Text style={[styles.label, { color: colors.foreground }]}>Layout</Text>
@@ -53,5 +69,6 @@ const styles = StyleSheet.create({
   choiceDot: { width: 13, height: 13, borderRadius: 7, borderWidth: StyleSheet.hairlineWidth },
   choiceText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
   hint: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 12 },
+  iconSection: { marginTop: 30 },
   librarySection: { marginTop: 30 },
 });
