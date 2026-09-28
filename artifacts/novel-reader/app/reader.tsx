@@ -390,7 +390,7 @@ function Paragraphs({
 export default function ReaderScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { hydrated: appHydrated, recordHistory, recordReadingSession } = useApp();
+  const { hydrated: appHydrated, recordHistory, recordReadingSession, beginReadingVisit, endReadingVisit, accumulateReadingTime, recordChaptersReadForBook } = useApp();
   const { getChapter } = useCatalog();
   const { width } = useWindowDimensions();
   const {
@@ -514,18 +514,31 @@ export default function ReaderScreen() {
       bookCover: activeBook.cover,
       chapter: activeBook.chapter,
     });
+    beginReadingVisit(activeBook.id, activeBook.title);
     let lastRecordedAt = Date.now();
     const interval = setInterval(() => {
       const now = Date.now();
-      recordReadingSession(activeBook.id, now - lastRecordedAt, 0);
+      const delta = now - lastRecordedAt;
+      recordReadingSession(activeBook.id, delta, 0);
+      accumulateReadingTime(activeBook.id, activeBook.title, delta);
       lastRecordedAt = now;
     }, 15_000);
 
     return () => {
       clearInterval(interval);
-      recordReadingSession(activeBook.id, Date.now() - lastRecordedAt, 0);
+      const delta = Date.now() - lastRecordedAt;
+      if (delta > 0) {
+        recordReadingSession(activeBook.id, delta, 0);
+        accumulateReadingTime(activeBook.id, activeBook.title, delta);
+      }
     };
-  }, [activeBook.chapter, activeBook.id, appHydrated, hasActiveBook, hydrated, recordHistory, recordReadingSession]);
+  }, [accumulateReadingTime, activeBook.chapter, activeBook.id, activeBook.title, appHydrated, beginReadingVisit, hasActiveBook, hydrated, recordHistory, recordReadingSession]);
+
+  useEffect(() => {
+    return () => {
+      endReadingVisit();
+    };
+  }, [endReadingVisit]);
 
   useEffect(() => {
     chromeProgress.value = withTiming(chromeVisible ? 1 : 0, {
@@ -733,6 +746,7 @@ export default function ReaderScreen() {
     advancingRef.current = true;
     suppressVerticalSaveRef.current = true;
     const nextChapter = advanceReading();
+    recordChaptersReadForBook(activeBook.id, activeBook.title, 1);
     if (nextChapter) {
       setLoadedChapters((chapters) => (chapters.includes(nextChapter) ? chapters : [...chapters, nextChapter]));
       hasScrolledRef.current = false;
