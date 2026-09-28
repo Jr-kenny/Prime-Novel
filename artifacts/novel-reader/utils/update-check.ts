@@ -6,13 +6,10 @@ import {
   fetchAppRelease,
   type AppRelease,
 } from './app-updates';
+import { updateStatusCopy, type UpdateCheckState } from './update-status';
 
-export type UpdateCheckState =
-  | 'idle'
-  | 'checking'
-  | 'up-to-date'
-  | 'available'
-  | 'error';
+export type { UpdateCheckState, UpdateStatusInput } from './update-status';
+export { updateStatusCopy } from './update-status';
 
 export type UpdateCheckResult = {
   state: UpdateCheckState;
@@ -63,20 +60,5 @@ export async function runUpdateCheck(): Promise<UpdateCheckResult> {
       checkedAt,
       errorMessage: error instanceof Error ? error.message : 'Unable to check for updates.',
     };
-  }
-}
-
-export function updateStatusCopy(result: UpdateCheckResult): string {
-  switch (result.state) {
-    case 'checking':
-      return 'Checking for updates...';
-    case 'up-to-date':
-      return `You're up to date (${result.currentVersion}).`;
-    case 'available':
-      return `Update available — Version ${result.availableVersion ?? 'unknown'}.`;
-    case 'error':
-      return result.errorMessage ?? 'Unable to check for updates.';
-    default:
-      return `Currently installed: ${result.currentVersion}.`;
   }
 }
