@@ -11,11 +11,10 @@ def safeExtGet(prop, fallback) {
 
 android {
   namespace 'expo.modules.appicon'
-  compileSdkVersion safeExtGet('compileSdkVersion', 35)
+  compileSdk safeExtGet('compileSdkVersion', 35)
 
   defaultConfig {
-    minSdkVersion safeExtGet('minSdkVersion', 24)
-    targetSdkVersion safeExtGet('targetSdkVersion', 35)
+    minSdk safeExtGet('minSdkVersion', 24)
   }
 
   compileOptions {
