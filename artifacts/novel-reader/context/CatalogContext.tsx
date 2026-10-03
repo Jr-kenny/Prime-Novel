@@ -25,6 +25,17 @@ import {
   persistDownloadDatabaseRecords,
   upsertDownloadDatabaseRecord,
 } from '@/utils/persistent-database';
+import {
+  createDownloadJob,
+  finishJob,
+  jobPendingChapters,
+  jobRetryChapters,
+  markJobChapterCompleted,
+  markJobChapterFailed,
+  type DownloadJob,
+  type DownloadJobChapter,
+} from '@/utils/download-jobs';
+import { loadDownloadJobs, upsertDownloadJob } from '@/utils/download-job-storage';
 
 export type DownloadedChapter = {
   key: string;
@@ -43,6 +54,7 @@ type CatalogContextValue = {
   searchError?: string;
   downloads: DownloadedChapter[];
   downloadsHydrated: boolean;
+  downloadJobs: DownloadJob[];
   search: (query: string) => Promise<void>;
   getNovel: (novel: PrimeNovel) => Promise<PrimeNovelDetails>;
   getChapter: (chapter: PrimeChapter, sourceId: string) => Promise<PrimeChapterContent>;
@@ -51,9 +63,15 @@ type CatalogContextValue = {
     novel: PrimeNovel,
     chapters: PrimeChapter[],
     onProgress?: (completed: number, total: number, failed: number) => void,
-  ) => Promise<{ downloaded: number; failed: number; total: number }>;
+  ) => Promise<{ downloaded: number; failed: number; total: number; skipped: number }>;
+  resumeDownloadJob: (
+    novel: PrimeNovel,
+    chapters: PrimeChapter[],
+    onProgress?: (completed: number, total: number, failed: number) => void,
+  ) => Promise<{ downloaded: number; failed: number; total: number; skipped: number }>;
   removeDownload: (key: string) => void;
   getDownloadedChapter: (key: string) => DownloadedChapter | undefined;
+  getDownloadJob: (novelId: string) => DownloadJob | undefined;
   clearResults: () => void;
 };
 
@@ -100,7 +118,11 @@ async function writeChapterContent(key: string, content: PrimeChapterContent) {
   const value = JSON.stringify(content);
   if (Platform.OS !== 'web' && downloadDirectory) {
     await FileSystem.makeDirectoryAsync(downloadDirectory, { intermediates: true });
-    await FileSystem.writeAsStringAsync(`${downloadDirectory}${cacheFileName(key)}`, value);
+    const destination = `${downloadDirectory}${cacheFileName(key)}`;
+    const temporary = `${destination}.tmp`;
+    await FileSystem.writeAsStringAsync(temporary, value);
+    await FileSystem.deleteAsync(destination, { idempotent: true });
+    await FileSystem.moveAsync({ from: temporary, to: destination });
     return;
   }
   await AsyncStorage.setItem(`${downloadContentStoragePrefix}${key}`, value);
@@ -137,6 +159,8 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   const [searchError, setSearchError] = useState<string | undefined>();
   const [downloads, setDownloads] = useState<DownloadedChapter[]>([]);
   const [downloadsHydrated, setDownloadsHydrated] = useState(false);
+  const [downloadJobs, setDownloadJobs] = useState<DownloadJob[]>([]);
+  const downloadJobsRef = useRef<DownloadJob[]>([]);
   const downloadsRef = useRef<DownloadedChapter[]>([]);
   const downloadsHydrationRef = useRef<Promise<void>>(Promise.resolve());
   const downloadsWriteRef = useRef<Promise<void>>(Promise.resolve());
@@ -204,6 +228,22 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
         downloadsHydratedRef.current = false;
         setDownloadsHydrated(false);
       });
+
+    void loadDownloadJobs()
+      .then((jobs) => {
+        downloadJobsRef.current = jobs;
+        setDownloadJobs(jobs);
+      })
+      .catch(() => {
+        downloadJobsRef.current = [];
+        setDownloadJobs([]);
+      });
+  }, []);
+
+  const commitDownloadJob = useCallback(async (job: DownloadJob) => {
+    downloadJobsRef.current = [job, ...downloadJobsRef.current.filter((item) => item.id !== job.id)];
+    setDownloadJobs(downloadJobsRef.current);
+    await upsertDownloadJob(job).catch(() => {});
   }, []);
 
   const persistDownloads = useCallback(async (next: DownloadedChapter[]) => {
@@ -342,18 +382,54 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     [saveDownloadedChapter],
   );
 
-  const downloadAllChapters = useCallback(async (
+  const runDownloadJob = useCallback(async (
     novel: PrimeNovel,
     chapters: PrimeChapter[],
+    mode: 'all' | 'resume',
     onProgress?: (completed: number, total: number, failed: number) => void,
   ) => {
-    if (chapters.length === 0) return { downloaded: 0, failed: 0, total: 0 };
+    if (chapters.length === 0) {
+      return { downloaded: 0, failed: 0, total: 0, skipped: 0 };
+    }
 
+    const downloadedKeys = new Set(downloadsRef.current.map((download) => download.key));
+    const jobChapters: DownloadJobChapter[] = chapters.map((chapter) => ({
+      key: chapterCacheKey(novel.sourceId, chapter.id),
+      id: chapter.id,
+      number: chapter.number,
+      title: chapter.title,
+    }));
+
+    const existingJob = downloadJobsRef.current.find((job) => job.id === novel.id);
+    const baseJob = existingJob && existingJob.novelId === novel.id
+      ? {
+          ...existingJob,
+          chapters: jobChapters,
+          completedKeys: existingJob.completedKeys.filter((key) => downloadedKeys.has(key)),
+        }
+      : createDownloadJob({
+          sourceId: novel.sourceId,
+          novelId: novel.id,
+          novelTitle: novel.title,
+          chapters: jobChapters,
+        });
+
+    let job: DownloadJob = { ...baseJob, status: 'running', updatedAt: Date.now() };
+    await commitDownloadJob(job);
+
+    const pendingKeys = new Set(jobPendingChapters(job, downloadedKeys).map((chapter) => chapter.key));
+    const retryKeys = new Set(jobRetryChapters(job, downloadedKeys).map((chapter) => chapter.key));
+    const pending = chapters.filter((chapter) => {
+      const key = chapterCacheKey(novel.sourceId, chapter.id);
+      return mode === 'resume' ? (pendingKeys.has(key) || retryKeys.has(key)) : pendingKeys.has(key);
+    });
+
+    const skipped = jobChapters.length - pending.length;
     const requestedConcurrency = Number(settings.downloadConcurrency);
     const concurrency = Number.isFinite(requestedConcurrency)
       ? Math.max(1, Math.min(12, Math.floor(requestedConcurrency)))
       : 1;
-    const workerCount = Math.min(concurrency, chapters.length);
+    const workerCount = Math.min(concurrency, Math.max(pending.length, 1));
     let nextIndex = 0;
     let downloaded = 0;
     let failed = 0;
@@ -362,22 +438,40 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
       while (true) {
         const chapterIndex = nextIndex;
         nextIndex += 1;
-        if (chapterIndex >= chapters.length) return;
+        if (chapterIndex >= pending.length) return;
 
+        const chapter = pending[chapterIndex];
         try {
-          await saveDownloadedChapter(novel, chapters[chapterIndex], false);
+          await saveDownloadedChapter(novel, chapter, false);
           downloaded += 1;
+          job = markJobChapterCompleted(job, chapterCacheKey(novel.sourceId, chapter.id));
         } catch {
           failed += 1;
+          job = markJobChapterFailed(job, chapterCacheKey(novel.sourceId, chapter.id));
         }
-        onProgress?.(downloaded + failed, chapters.length, failed);
+        await commitDownloadJob(job);
+        onProgress?.(downloaded + failed + skipped, jobChapters.length, failed);
       }
     };
 
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
     await commitDownloads(downloadsRef.current.map(downloadMetadata));
-    return { downloaded, failed, total: chapters.length };
-  }, [commitDownloads, saveDownloadedChapter, settings.downloadConcurrency]);
+    job = finishJob(job);
+    await commitDownloadJob(job);
+    return { downloaded, failed, total: jobChapters.length, skipped };
+  }, [commitDownloadJob, commitDownloads, saveDownloadedChapter, settings.downloadConcurrency]);
+
+  const downloadAllChapters = useCallback(async (
+    novel: PrimeNovel,
+    chapters: PrimeChapter[],
+    onProgress?: (completed: number, total: number, failed: number) => void,
+  ) => runDownloadJob(novel, chapters, 'all', onProgress), [runDownloadJob]);
+
+  const resumeDownloadJob = useCallback(async (
+    novel: PrimeNovel,
+    chapters: PrimeChapter[],
+    onProgress?: (completed: number, total: number, failed: number) => void,
+  ) => runDownloadJob(novel, chapters, 'resume', onProgress), [runDownloadJob]);
 
   const removeDownload = useCallback((key: string) => {
     deleteDownloadDatabaseRecord(key);
@@ -387,6 +481,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   }, [persistDownloads]);
 
   const getDownloadedChapter = useCallback((key: string) => downloadsRef.current.find((download) => download.key === key), []);
+  const getDownloadJob = useCallback((novelId: string) => downloadJobsRef.current.find((job) => job.id === novelId), []);
   const clearResults = useCallback(() => {
     searchRequestRef.current += 1;
     setResults([]);
@@ -402,15 +497,18 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     searchError,
     downloads,
     downloadsHydrated,
+    downloadJobs,
     search,
     getNovel,
     getChapter,
     downloadChapter,
     downloadAllChapters,
+    resumeDownloadJob,
     removeDownload,
     getDownloadedChapter,
+    getDownloadJob,
     clearResults,
-  }), [clearResults, downloadAllChapters, downloadChapter, downloads, downloadsHydrated, getChapter, getDownloadedChapter, getNovel, removeDownload, results, search, searchError, searching, sourceResults]);
+  }), [clearResults, downloadAllChapters, downloadChapter, downloadJobs, downloads, downloadsHydrated, getChapter, getDownloadJob, getDownloadedChapter, getNovel, removeDownload, resumeDownloadJob, results, search, searchError, searching, sourceResults]);
 
   return <CatalogContext.Provider value={value}>{children}</CatalogContext.Provider>;
 }
