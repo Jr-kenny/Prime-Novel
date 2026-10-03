@@ -1,6 +1,6 @@
 apply plugin: 'com.android.library'
-apply plugin: 'kotlin-android'
-apply plugin: 'expo-module'
+apply plugin: 'org.jetbrains.kotlin.android'
+apply plugin: 'expo-module-gradle-plugin'
 
 group = 'expo.modules.appicon'
 version = '0.1.0'
@@ -11,10 +11,10 @@ def safeExtGet(prop, fallback) {
 
 android {
   namespace 'expo.modules.appicon'
-  compileSdk safeExtGet('compileSdkVersion', 35)
+  compileSdk 35
 
   defaultConfig {
-    minSdk safeExtGet('minSdkVersion', 24)
+    minSdk 24
   }
 
   compileOptions {
