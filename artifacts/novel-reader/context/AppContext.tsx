@@ -8,12 +8,15 @@ import { PRIME_SOURCE_REGISTRY } from '@/data/prime-sources';
 import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
 import { durableStorageWrite } from '@/utils/durable-storage';
 import { loadAppDatabaseState, persistAppDatabaseState } from '@/utils/persistent-database';
+import { DEFAULT_APP_ICON, normalizeAppIconId, type AppIconId } from '@/utils/app-icon';
+import { applyAppIcon, readActiveAppIcon } from '@/utils/app-icon-switch';
 
 export type LibraryLayout = 'shelf' | 'grid';
 export type UpdateFrequency = 'off' | 'hourly' | 'daily';
 export type AppTheme = 'cream' | 'white' | 'dark';
 
 export type AppSettings = {
+  appIcon: AppIconId;
   appTheme: AppTheme;
   autoBookmarkFromShare: boolean;
   downloadConcurrency: number;
@@ -106,6 +109,7 @@ type AppContextValue = AppSnapshot & {
 };
 
 const defaultSettings: AppSettings = {
+  appIcon: DEFAULT_APP_ICON,
   appTheme: 'cream',
   autoBookmarkFromShare: true,
   downloadConcurrency: 3,
@@ -188,7 +192,12 @@ function normalizeSettings(stored: Partial<AppSettings>) {
     : storedFrequency === 'manual' || storedFrequency === 'off'
       ? 'off'
       : defaultSettings.updateFrequency;
-  return { ...defaultSettings, ...stored, updateFrequency };
+  return {
+    ...defaultSettings,
+    ...stored,
+    appIcon: normalizeAppIconId(stored.appIcon),
+    updateFrequency,
+  };
 }
 
 function normalizeSources(stored: SourceRecord[]) {
@@ -326,6 +335,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
   }, [persist]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const active = await readActiveAppIcon();
+        if (cancelled) return;
+        const preferred = normalizeAppIconId(settings.appIcon);
+        if (active !== preferred) {
+          await applyAppIcon(preferred);
+        }
+      } catch {
+        // Icon sync is best-effort. The stored preference remains the source of truth.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated, settings.appIcon]);
 
   const addRepository = useCallback((rawUrl: string, customName?: string) => {
     if (process.env.EXPO_OS !== 'android') return false;
