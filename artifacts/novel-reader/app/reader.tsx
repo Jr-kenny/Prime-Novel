@@ -17,6 +17,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import {
+  AppState,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -515,22 +516,30 @@ export default function ReaderScreen() {
       chapter: activeBook.chapter,
     });
     beginReadingVisit(activeBook.id, activeBook.title);
-    let lastRecordedAt = Date.now();
-    const interval = setInterval(() => {
+    // Only active reading counts: flush incrementally, discard any time the
+    // app spends backgrounded, and never count idle/app-open time.
+    const lastRecordedAtRef = { current: Date.now() };
+    const flush = () => {
       const now = Date.now();
-      const delta = now - lastRecordedAt;
-      // New daily-stats system is the sole writer of reading time. The legacy
-      // per-tick session array is capped and would double-count in the total.
-      accumulateReadingTime(activeBook.id, activeBook.title, delta);
-      lastRecordedAt = now;
-    }, 15_000);
-
-    return () => {
-      clearInterval(interval);
-      const delta = Date.now() - lastRecordedAt;
+      const delta = now - lastRecordedAtRef.current;
+      lastRecordedAtRef.current = now;
       if (delta > 0) {
         accumulateReadingTime(activeBook.id, activeBook.title, delta);
       }
+    };
+    const interval = setInterval(flush, 15_000);
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        lastRecordedAtRef.current = Date.now();
+      } else {
+        flush();
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+      flush();
     };
   }, [accumulateReadingTime, activeBook.chapter, activeBook.id, activeBook.title, appHydrated, beginReadingVisit, hasActiveBook, hydrated, recordHistory]);
 
