@@ -390,7 +390,7 @@ function Paragraphs({
 export default function ReaderScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { hydrated: appHydrated, recordHistory, recordReadingSession, beginReadingVisit, endReadingVisit, accumulateReadingTime, recordChaptersReadForBook } = useApp();
+  const { hydrated: appHydrated, recordHistory, beginReadingVisit, endReadingVisit, accumulateReadingTime, recordChaptersReadForBook } = useApp();
   const { getChapter } = useCatalog();
   const { width } = useWindowDimensions();
   const {
@@ -519,7 +519,8 @@ export default function ReaderScreen() {
     const interval = setInterval(() => {
       const now = Date.now();
       const delta = now - lastRecordedAt;
-      recordReadingSession(activeBook.id, delta, 0);
+      // New daily-stats system is the sole writer of reading time. The legacy
+      // per-tick session array is capped and would double-count in the total.
       accumulateReadingTime(activeBook.id, activeBook.title, delta);
       lastRecordedAt = now;
     }, 15_000);
@@ -528,11 +529,10 @@ export default function ReaderScreen() {
       clearInterval(interval);
       const delta = Date.now() - lastRecordedAt;
       if (delta > 0) {
-        recordReadingSession(activeBook.id, delta, 0);
         accumulateReadingTime(activeBook.id, activeBook.title, delta);
       }
     };
-  }, [accumulateReadingTime, activeBook.chapter, activeBook.id, activeBook.title, appHydrated, beginReadingVisit, hasActiveBook, hydrated, recordHistory, recordReadingSession]);
+  }, [accumulateReadingTime, activeBook.chapter, activeBook.id, activeBook.title, appHydrated, beginReadingVisit, hasActiveBook, hydrated, recordHistory]);
 
   useEffect(() => {
     return () => {

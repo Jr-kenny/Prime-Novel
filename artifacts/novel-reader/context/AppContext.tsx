@@ -609,33 +609,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const beginReadingVisit = useCallback((bookId: string, bookTitle?: string) => {
     if (activeVisitRef.current?.bookId === bookId) return;
-    if (activeVisitRef.current) {
-      const previous = activeVisitRef.current;
-      const durationMs = Date.now() - previous.startedAt;
-      commitReadingStats(recordReadingTime(recordReadingSessionStat(readingStatsRef.current, {
-        bookId: previous.bookId,
-        bookTitle: previous.bookTitle,
-      }), {
-        bookId: previous.bookId,
-        bookTitle: previous.bookTitle,
-        durationMs,
-      }));
-    }
+    // Reading time is flushed incrementally by the reader interval, so only
+    // count the visit here. Recording the full visit duration as well would
+    // double-count time the interval already accumulated.
     commitReadingStats(recordReadingSessionStat(readingStatsRef.current, { bookId, bookTitle }));
     activeVisitRef.current = { bookId, bookTitle, startedAt: Date.now() };
   }, [commitReadingStats]);
 
   const endReadingVisit = useCallback(() => {
-    const active = activeVisitRef.current;
-    if (!active) return;
+    // Time was already flushed incrementally (interval + effect cleanup), so
+    // just close the visit without adding the full duration again.
     activeVisitRef.current = null;
-    const durationMs = Date.now() - active.startedAt;
-    commitReadingStats(recordReadingTime(readingStatsRef.current, {
-      bookId: active.bookId,
-      bookTitle: active.bookTitle,
-      durationMs,
-    }));
-  }, [commitReadingStats]);
+  }, []);
 
   const accumulateReadingTime = useCallback((bookId: string, bookTitle: string | undefined, durationMs: number) => {
     if (durationMs <= 0) return;

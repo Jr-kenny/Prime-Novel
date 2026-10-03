@@ -58,8 +58,12 @@ export default function AnalyticsScreen() {
   const { readingSessions, readingStats, hydrated: appHydrated } = useApp();
 
   const analytics = useMemo(() => {
-    const totalReadingTime = readingSessions.reduce((sum, session) => sum + session.durationMs, 0)
-      + readingStats.days.reduce((sum, day) => sum + day.readingTimeMs, 0);
+    // Legacy per-tick sessions are frozen history (no new writes since the
+    // capped array pinned totals at ~2h). New daily stats are the live source
+    // of truth, so the total is frozen legacy + growing daily.
+    const legacyReadingTime = readingSessions.reduce((sum, session) => sum + session.durationMs, 0);
+    const dailyReadingTime = readingStats.days.reduce((sum, day) => sum + day.readingTimeMs, 0);
+    const totalReadingTime = legacyReadingTime + dailyReadingTime;
     const totalReadChapters = books.reduce((sum, book) => sum + readChapterCount(book), 0);
     const totalUnreadChapters = books.reduce((sum, book) => sum + unreadChapterCount(book), 0);
     const genreCounts = new Map<string, number>();
