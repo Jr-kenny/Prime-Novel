@@ -17,6 +17,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import {
+  AppState,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -390,7 +391,7 @@ function Paragraphs({
 export default function ReaderScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { hydrated: appHydrated, recordHistory, recordReadingSession } = useApp();
+  const { hydrated: appHydrated, recordHistory, beginReadingVisit, endReadingVisit, accumulateReadingTime, recordChaptersReadForBook } = useApp();
   const { getChapter } = useCatalog();
   const { width } = useWindowDimensions();
   const {
@@ -514,18 +515,39 @@ export default function ReaderScreen() {
       bookCover: activeBook.cover,
       chapter: activeBook.chapter,
     });
-    let lastRecordedAt = Date.now();
-    const interval = setInterval(() => {
+    beginReadingVisit(activeBook.id, activeBook.title);
+    // Only active reading counts: flush incrementally, discard any time the
+    // app spends backgrounded, and never count idle/app-open time.
+    const lastRecordedAtRef = { current: Date.now() };
+    const flush = () => {
       const now = Date.now();
-      recordReadingSession(activeBook.id, now - lastRecordedAt, 0);
-      lastRecordedAt = now;
-    }, 15_000);
+      const delta = now - lastRecordedAtRef.current;
+      lastRecordedAtRef.current = now;
+      if (delta > 0) {
+        accumulateReadingTime(activeBook.id, activeBook.title, delta);
+      }
+    };
+    const interval = setInterval(flush, 15_000);
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        lastRecordedAtRef.current = Date.now();
+      } else {
+        flush();
+      }
+    });
 
     return () => {
       clearInterval(interval);
-      recordReadingSession(activeBook.id, Date.now() - lastRecordedAt, 0);
+      subscription.remove();
+      flush();
     };
-  }, [activeBook.chapter, activeBook.id, appHydrated, hasActiveBook, hydrated, recordHistory, recordReadingSession]);
+  }, [accumulateReadingTime, activeBook.chapter, activeBook.id, activeBook.title, appHydrated, beginReadingVisit, hasActiveBook, hydrated, recordHistory]);
+
+  useEffect(() => {
+    return () => {
+      endReadingVisit();
+    };
+  }, [endReadingVisit]);
 
   useEffect(() => {
     chromeProgress.value = withTiming(chromeVisible ? 1 : 0, {
@@ -733,6 +755,7 @@ export default function ReaderScreen() {
     advancingRef.current = true;
     suppressVerticalSaveRef.current = true;
     const nextChapter = advanceReading();
+    recordChaptersReadForBook(activeBook.id, activeBook.title, 1);
     if (nextChapter) {
       setLoadedChapters((chapters) => (chapters.includes(nextChapter) ? chapters : [...chapters, nextChapter]));
       hasScrolledRef.current = false;
