@@ -28,10 +28,13 @@ function Choice({ label, selected, onPress, dot, palette }: { label: string; sel
   );
 }
 
-function Toggle({ label, value, onChange, palette }: { label: string; value: boolean; onChange: (value: boolean) => void; palette: ReaderPalette }) {
+function Toggle({ label, value, onChange, palette, description }: { label: string; value: boolean; onChange: (value: boolean) => void; palette: ReaderPalette; description?: string }) {
   return (
     <View style={[styles.row, { borderBottomColor: palette.border }]}>
-      <Text style={[styles.label, { color: palette.text }]}>{label}</Text>
+      <View style={styles.toggleCopy}>
+        <Text style={[styles.label, { color: palette.text }]}>{label}</Text>
+        {description ? <Text style={[styles.description, { color: palette.muted }]}>{description}</Text> : null}
+      </View>
       <Switch accessibilityLabel={label} onValueChange={onChange} trackColor={{ false: palette.border, true: palette.accent }} thumbColor={value ? palette.text : palette.muted} value={value} />
     </View>
   );
@@ -85,7 +88,7 @@ export function ReaderSettingsControls({ preferences, onChange, palette }: { pre
       </View>
 
       <Text style={[styles.section, { color: palette.muted }]}>READER</Text>
-      <Toggle label="Fullscreen" value={preferences.fullscreen} onChange={(value) => onChange({ fullscreen: value })} palette={palette} />
+      <Toggle description="Hide controls and system bars for distraction-free reading." label="Fullscreen" value={preferences.fullscreen} onChange={(value) => onChange({ fullscreen: value })} palette={palette} />
       <Toggle label="Keep screen awake" value={preferences.keepScreenAwake} onChange={(value) => onChange({ keepScreenAwake: value })} palette={palette} />
       <Toggle label="Lock rotation" value={preferences.lockRotation} onChange={(value) => onChange({ lockRotation: value })} palette={palette} />
     </>
@@ -95,7 +98,9 @@ export function ReaderSettingsControls({ preferences, onChange, palette }: { pre
 const styles = StyleSheet.create({
   section: { fontFamily: 'Inter_600SemiBold', fontSize: 10, letterSpacing: 1.4, marginTop: 25, marginBottom: 6 },
   row: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  toggleCopy: { flex: 1, gap: 3 },
   label: { fontFamily: 'Inter_500Medium', fontSize: 13, flex: 1 },
+  description: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 15 },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   stepButton: { width: 30, height: 30, borderWidth: StyleSheet.hairlineWidth, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   stepText: { fontFamily: 'Inter_500Medium', fontSize: 18, lineHeight: 20 },
