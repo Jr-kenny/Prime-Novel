@@ -1,4 +1,4 @@
-const { withAndroidManifest, createRunOncePlugin } = require('@expo/config-plugins');
+const { withAndroidManifest, createRunOncePlugin } = require('expo/config-plugins');
 
 const withInstallPackagesPermission = (config) => {
   return withAndroidManifest(config, (modConfig) => {
