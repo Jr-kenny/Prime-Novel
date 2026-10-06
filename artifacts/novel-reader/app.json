@@ -19,7 +19,8 @@
       "supportsTablet": false
     },
     "android": {
-      "package": "com.primehouse.primenovel"
+      "package": "com.primehouse.primenovel",
+      "versionCode": 2
     },
     "web": {
       "output": "single",
