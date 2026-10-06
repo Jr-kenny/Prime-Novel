@@ -1,4 +1,4 @@
-import { NativeModulesProxy, requireNativeModule } from 'expo-modules-core';
+import { requireNativeModule } from 'expo';
 import type { AppIconId } from './app-icon';
 import { DEFAULT_APP_ICON, normalizeAppIconId } from './app-icon';
 
@@ -13,8 +13,6 @@ type AppIconModule = {
 };
 
 function resolveModule(): AppIconModule | null {
-  const direct = (NativeModulesProxy as { AppIcon?: AppIconModule }).AppIcon;
-  if (direct) return direct;
   try {
     return requireNativeModule<AppIconModule>('AppIcon');
   } catch {
