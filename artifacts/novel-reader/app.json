@@ -3,7 +3,7 @@
     "name": "Prime Novel",
     "slug": "novel-reader",
     "description": "Prime Novel is a calm, native reading app for discovering, organizing, and reading novels. Customize themes, fonts, text size, spacing, and reading modes, save progress offline, manage downloads, and return to the exact place you stopped.",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "default",
     "icon": "./assets/images/icon-launcher.png",
     "scheme": "novel-reader",
