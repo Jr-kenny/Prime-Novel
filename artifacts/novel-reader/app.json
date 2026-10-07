@@ -20,7 +20,7 @@
     },
     "android": {
       "package": "com.primehouse.primenovel",
-      "versionCode": 2
+      "versionCode": 3
     },
     "web": {
       "output": "single",

@@ -23,6 +23,13 @@ function withAndroidIcons(config) {
       const resRoot = path.join(modConfig.modRequest.platformProjectRoot, 'app', 'src', 'main', 'res');
 
       for (const icon of icons) {
+        if (icon.id === 'classic') {
+          // Skip the classic icon: Expo generates the default launcher icon
+          // itself (ic_launcher.webp). Writing ic_launcher.png alongside it
+          // produces "Duplicate resources" at :app:mergeReleaseResources.
+          // Classic stays as the primary MainActivity icon with no alias.
+          continue;
+        }
         const mipmapFolders = {
           mdpi: 48,
           hdpi: 72,
@@ -31,8 +38,8 @@ function withAndroidIcons(config) {
           xxxhdpi: 192,
         };
 
-        for (const [folder, size] of Object.entries(mipmapFolders)) {
-          const name = icon.id === 'classic' ? 'ic_launcher' : `ic_launcher_${icon.id}`;
+        for (const folder of Object.keys(mipmapFolders)) {
+          const name = `ic_launcher_${icon.id}`;
           const destination = path.join(resRoot, `mipmap-${folder}`, `${name}.png`);
           const source = path.join(projectRoot, 'assets/icons', icon.file);
           ensureDir(destination);
