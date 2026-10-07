@@ -19,7 +19,7 @@
   "rewrites": [
     {
       "source": "/downloads/prime-novel-android.apk",
-      "destination": "https://github.com/Jr-kenny/Prime-Novel/releases/download/v1.0.5-android/Prime-Novel-1.0.5.apk"
+      "destination": "https://github.com/Jr-kenny/Prime-Novel/releases/download/v1.0.6-android/Prime-Novel-1.0.6.apk"
     },
     {
       "source": "/app/_expo/:path*",

@@ -1,9 +1,9 @@
 {
-  "version": "1.0.5",
-  "versionCode": 20,
+  "version": "1.0.6",
+  "versionCode": 21,
   "notes": [
     "Reading view is back to native long-press select and copy, tap-to-highlight removed.",
-    "Faster paging and scrolling in downloaded novels."
+    "Steady reader chrome with no shaking when showing or hiding controls."
   ],
   "android": {
     "url": "/downloads/prime-novel-android.apk"
