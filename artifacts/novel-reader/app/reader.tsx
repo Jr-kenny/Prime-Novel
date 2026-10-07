@@ -37,7 +37,7 @@ import { useCatalog } from '@/context/CatalogContext';
 import { useColors } from '@/hooks/useColors';
 import { Book, ReaderFont, ReaderMode, ReaderPreferences, ReaderTheme, useReader } from '@/context/ReaderContext';
 import { getReaderFont, getReaderPalette, ReaderPalette } from '@/utils/reader-style';
-import { tokenizeParagraph, formatChapterForCopy, formatHighlightsForCopy, highlightsForChapter } from '@/utils/word-highlights';
+import { formatChapterForCopy } from '@/utils/word-highlights';
 import { WebLandingButton } from '@/components/WebLandingButton';
 
 const KEEP_AWAKE_TAG = 'prime-novel-reader';
@@ -358,25 +358,18 @@ function Paragraphs({
   palette,
   startOffset = 0,
   keyPrefix,
-  onToggleWord,
-  isWordHighlighted,
-  onWordTap,
 }: {
   paragraphs: string[];
   preferences: ReaderPreferences;
   palette: ReaderPalette;
   startOffset?: number;
   keyPrefix: string;
-  onToggleWord: (paragraphIndex: number, wordIndex: number, word: string) => void;
-  isWordHighlighted: (paragraphIndex: number, wordIndex: number) => boolean;
-  onWordTap?: () => void;
 }) {
   const readerFont = getReaderFont(preferences.font);
   return (
     <>
       {paragraphs.map((paragraph, index) => {
         const indentPrefix = preferences.paragraphIndent && index > 0 ? '\u2003\u2003' : '';
-        const tokens = tokenizeParagraph(indentPrefix + paragraph);
         return (
           <Text
             key={`${keyPrefix}-${index}`}
@@ -392,24 +385,7 @@ function Paragraphs({
               },
             ]}
           >
-            {tokens.map((token) => {
-              if (!token.isWord) return token.text;
-              const wordIndex = Math.max(0, token.index);
-              const highlighted = isWordHighlighted(index, wordIndex);
-              return (
-                <Text
-                  key={`${keyPrefix}-${index}-${token.index}`}
-                  onPress={() => {
-                    onWordTap?.();
-                    onToggleWord(index, wordIndex, token.text);
-                  }}
-                  suppressHighlighting
-                  style={highlighted ? { backgroundColor: palette.accent, color: palette.background, borderRadius: 3 } : undefined}
-                >
-                  {token.text}
-                </Text>
-              );
-            })}
+            {indentPrefix + paragraph}
           </Text>
         );
       })}
@@ -436,8 +412,6 @@ export default function ReaderScreen() {
     markChapterRead,
     markChapterUnread,
     isChapterRead,
-    toggleWordHighlight,
-    wordHighlights,
     hydrated,
   } = useReader();
   const activeBook = selectedBook ?? emptyBook;
@@ -467,7 +441,6 @@ export default function ReaderScreen() {
   const restoredHorizontalPositionsRef = useRef<Set<string>>(new Set());
   const restoringHorizontalPositionsRef = useRef<Set<string>>(new Set());
   const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
-  const wordInteractionRef = useRef(false);
   const hasScrolledRef = useRef(false);
   const advancingRef = useRef(false);
   const suppressVerticalSaveRef = useRef(false);
@@ -935,45 +908,10 @@ export default function ReaderScreen() {
 
   const handleReadingTouchEnd = (event: GestureResponderEvent) => {
     if (Platform.OS === 'web') return;
-    if (wordInteractionRef.current) {
-      wordInteractionRef.current = false;
-      return;
-    }
     const start = touchStartRef.current;
     const moved = Math.hypot(event.nativeEvent.pageX - start.x, event.nativeEvent.pageY - start.y) > 12;
     const wasTap = Date.now() - start.time < 450;
     if (!settingsOpen && wasTap && !moved) setControlsVisible((visible) => !visible);
-  };
-
-  const onToggleWord = (paragraphIndex: number, wordIndex: number, word: string) => {
-    if (!hasActiveBook) return;
-    wordInteractionRef.current = true;
-    toggleWordHighlight({
-      bookId: activeBook.id,
-      chapter: activeBook.chapter,
-      paragraphIndex,
-      wordIndex,
-      word,
-    });
-  };
-
-  const isChapterWordHighlighted = (paragraphIndex: number, wordIndex: number) => (
-    wordHighlights.some((highlight) => (
-      highlight.bookId === activeBook.id
-      && highlight.chapter === activeBook.chapter
-      && highlight.paragraphIndex === paragraphIndex
-      && highlight.wordIndex === wordIndex
-    ))
-  );
-
-  const chapterHighlights = wordHighlights.filter((highlight) => (
-    highlight.bookId === activeBook.id && highlight.chapter === activeBook.chapter
-  ));
-
-  const copyHighlightedWords = async () => {
-    const text = formatHighlightsForCopy(chapterHighlights, paragraphsFor(activeBook.chapter));
-    if (!text) return;
-    await Clipboard.setStringAsync(text);
   };
 
   const copyChapterText = async () => {
@@ -986,10 +924,6 @@ export default function ReaderScreen() {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const handleReadingSurfaceClick = (event: MouseEvent) => {
       if (settingsOpen || !(event.target instanceof Element)) return;
-      if (wordInteractionRef.current) {
-        wordInteractionRef.current = false;
-        return;
-      }
       const readingSurface = event.target.closest('[data-testid="reader-vertical-scroll"], [data-testid="reader-horizontal-scroll"]');
       if (readingSurface) setControlsVisible((visible) => !visible);
     };
@@ -1088,8 +1022,6 @@ export default function ReaderScreen() {
                   preferences={readerPreferences}
                   palette={palette}
                   keyPrefix={`${activeBook.id}-${chapter}`}
-                  onToggleWord={onToggleWord}
-                  isWordHighlighted={isChapterWordHighlighted}
                 />
               )}
             </View>
@@ -1147,8 +1079,6 @@ export default function ReaderScreen() {
                       preferences={readerPreferences}
                       palette={palette}
                       keyPrefix={`${activeBook.id}-horizontal-${chapter}`}
-                      onToggleWord={onToggleWord}
-                      isWordHighlighted={isChapterWordHighlighted}
                     />
                   )}
                   {chapter === activeBook.totalChapters ? (
@@ -1200,19 +1130,6 @@ export default function ReaderScreen() {
             >
               <Feather name="copy" size={16} color={palette.text} />
             </Pressable>
-            {chapterHighlights.length > 0 ? (
-              <Pressable
-                accessibilityLabel={`Copy ${chapterHighlights.length} highlighted words`}
-                accessibilityRole="button"
-                hitSlop={8}
-                onPress={() => void copyHighlightedWords()}
-                style={({ pressed }) => [styles.copyButton, { backgroundColor: palette.accent, opacity: pressed ? 0.72 : 1 }]}
-                testID="reader-copy-highlights"
-              >
-                <Feather name="check" size={14} color={palette.background} />
-                <Text style={[styles.copyButtonLabel, { color: palette.background }]}>{chapterHighlights.length}</Text>
-              </Pressable>
-            ) : null}
             <Pressable
               accessibilityLabel="Reader settings"
               accessibilityRole="button"

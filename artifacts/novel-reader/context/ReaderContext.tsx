@@ -4,11 +4,6 @@ import { AppState } from 'react-native';
 import { durableStorageWrite } from '@/utils/durable-storage';
 import { readPersistentBackup, writePersistentBackup } from '@/utils/persistent-backup';
 import { loadReaderDatabaseState, persistReaderDatabaseState } from '@/utils/persistent-database';
-import {
-  isWordHighlighted as isWordHighlightedHelper,
-  toggleHighlight,
-  type WordHighlight,
-} from '@/utils/word-highlights';
 
 export type BookStatus = 'New chapters' | 'Continue' | 'On hold' | 'Plan to read' | 'Completed';
 export type ReaderTheme = 'paper' | 'soft-dark' | 'black' | 'white';
@@ -87,9 +82,6 @@ type ReaderContextValue = {
   addBookmark: (chapter?: number, bookId?: string) => void;
   removeBookmark: (chapter?: number, bookId?: string) => void;
   isChapterBookmarked: (chapter?: number, bookId?: string) => boolean;
-  wordHighlights: WordHighlight[];
-  toggleWordHighlight: (highlight: Omit<WordHighlight, 'id' | 'createdAt'>) => void;
-  isWordHighlighted: (bookId: string, chapter: number, paragraphIndex: number, wordIndex: number) => boolean;
   getReadingPosition: (bookId?: string, chapter?: number) => ReadingPosition;
   saveReadingPosition: (position: Partial<ReadingPosition>, bookId?: string) => void;
   hydrated: boolean;
@@ -114,7 +106,6 @@ type StorageSnapshot = {
   activeId: string;
   preferences: ReaderPreferences;
   bookmarks: Record<string, number[]>;
-  wordHighlights: WordHighlight[];
   positions: Record<string, ReadingPosition>;
 };
 
@@ -123,7 +114,6 @@ const initialSnapshot: StorageSnapshot = {
   activeId: '',
   preferences: defaultReaderPreferences,
   bookmarks: {},
-  wordHighlights: [],
   positions: {},
 };
 
@@ -146,10 +136,8 @@ function parseStoredSnapshot(value: string | null): StorageSnapshot | undefined 
   try {
     const parsed = JSON.parse(value) as Partial<StorageSnapshot>;
     if (!Array.isArray(parsed.books) || typeof parsed.activeId !== 'string' || !parsed.preferences || !parsed.bookmarks || !parsed.positions) return undefined;
-    return {
-      ...(parsed as StorageSnapshot),
-      wordHighlights: Array.isArray(parsed.wordHighlights) ? parsed.wordHighlights : [],
-    };
+    const { wordHighlights: _droppedHighlights, ...rest } = parsed as StorageSnapshot & { wordHighlights?: unknown };
+    return rest;
   } catch {
     return undefined;
   }
@@ -226,7 +214,6 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
   const [activeId, setActiveId] = useState('');
   const [readerPreferences, setReaderPreferences] = useState<ReaderPreferences>(defaultReaderPreferences);
   const [bookmarks, setBookmarks] = useState<Record<string, number[]>>({});
-  const [wordHighlights, setWordHighlights] = useState<WordHighlight[]>([]);
   const [readingPositions, setReadingPositions] = useState<Record<string, ReadingPosition>>({});
   const [hydrated, setHydrated] = useState(false);
   const snapshotRef = useRef<StorageSnapshot>(initialSnapshot);
@@ -242,7 +229,6 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       ['novel-theme', snapshot.preferences.theme],
       ['novel-preferences', JSON.stringify(snapshot.preferences)],
       ['novel-bookmarks', JSON.stringify(snapshot.bookmarks)],
-      ['novel-word-highlights', JSON.stringify(snapshot.wordHighlights ?? [])],
       ['novel-positions', JSON.stringify(snapshot.positions)],
     ]));
     if (snapshot.books.length === 0) return;
@@ -261,15 +247,13 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
       'novel-preferences',
       'novel-bookmarks',
       'novel-positions',
-      'novel-word-highlights',
       readerBackupStorageKey,
     ])
       .then(async (entries) => {
         const databaseSnapshot = loadReaderDatabaseState<StorageSnapshot>();
         const storedPositions = readJson<Record<string, ReadingPosition>>(entries[5][1], {});
         const primaryBooks = parseStoredBooks(entries[0][1]);
-        const storedWordHighlights = readJson<WordHighlight[]>(entries[6][1], []);
-        const asyncBackup = parseStoredSnapshot(entries[7][1]);
+        const asyncBackup = parseStoredSnapshot(entries[6][1]);
         const fileBackup = primaryBooks === undefined || primaryBooks.length === 0 ? await readPersistentBackup<StorageSnapshot>('reader-state') : undefined;
         const availableBackup = asyncBackup ?? fileBackup;
         const recoveredSnapshot = primaryBooks === undefined || (primaryBooks.length === 0 && availableBackup?.books.length)
@@ -311,8 +295,6 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
           activeId: storedActive,
           preferences: databaseSnapshot?.preferences ?? (recoveredSnapshot?.preferences && primaryBooks === undefined ? recoveredSnapshot.preferences : nextPreferences),
           bookmarks: databaseSnapshot?.bookmarks ?? (recoveredSnapshot?.bookmarks && primaryBooks === undefined ? recoveredSnapshot.bookmarks : storedBookmarks),
-          wordHighlights: databaseSnapshot?.wordHighlights
-            ?? (recoveredSnapshot?.wordHighlights && primaryBooks === undefined ? recoveredSnapshot.wordHighlights : storedWordHighlights),
           positions: databaseSnapshot?.positions ?? (recoveredSnapshot?.positions && primaryBooks === undefined ? recoveredSnapshot.positions : storedPositions),
         };
 
@@ -323,7 +305,6 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         setActiveId(storedActive);
         setReaderPreferences(nextSnapshot.preferences);
         setBookmarks(nextSnapshot.bookmarks);
-        setWordHighlights(nextSnapshot.wordHighlights ?? []);
         setReadingPositions(nextSnapshot.positions);
         if (nextSnapshot.books.length > 0) {
           await Promise.all([
@@ -567,16 +548,6 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
     bookId = snapshotRef.current.activeId,
   ) => Boolean(chapter && snapshotRef.current.bookmarks[bookId]?.includes(chapter));
 
-  const toggleWordHighlight = (highlight: Omit<WordHighlight, 'id' | 'createdAt'>) => {
-    const next = toggleHighlight(snapshotRef.current.wordHighlights ?? [], highlight);
-    setWordHighlights(next);
-    writeSnapshot({ wordHighlights: next });
-  };
-
-  const isWordHighlighted = (bookId: string, chapter: number, paragraphIndex: number, wordIndex: number) => (
-    isWordHighlightedHelper(snapshotRef.current.wordHighlights ?? [], bookId, chapter, paragraphIndex, wordIndex)
-  );
-
   const getReadingPosition = (bookId = snapshotRef.current.activeId, chapter?: number) => {
     const book = snapshotRef.current.books.find((item) => item.id === bookId);
     return positionForChapter(book, snapshotRef.current.positions, chapter ?? book?.chapter ?? 1);
@@ -639,9 +610,6 @@ export function ReaderProvider({ children }: { children: React.ReactNode }) {
         addBookmark,
         removeBookmark,
         isChapterBookmarked,
-        wordHighlights,
-        toggleWordHighlight,
-        isWordHighlighted,
         getReadingPosition,
         saveReadingPosition,
         hydrated,
