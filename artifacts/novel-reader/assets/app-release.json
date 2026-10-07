@@ -1,9 +1,9 @@
 {
-  "version": "1.0.1",
-  "versionCode": 3,
+  "version": "1.0.3",
+  "versionCode": 4,
   "notes": [
-    "Expanded English source catalog with live-tested Shosetsu sources.",
-    "Improved source search and chapter loading coverage."
+    "Reliable in-app updates that keep your library, downloads, and reading progress.",
+    "Background downloads with resume, plus reading analytics and tap-to-highlight."
   ],
   "android": {
     "url": "/downloads/prime-novel-android.apk"
