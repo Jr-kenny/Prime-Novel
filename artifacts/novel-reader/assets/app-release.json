@@ -1,9 +1,9 @@
 {
-  "version": "1.0.4",
-  "versionCode": 19,
+  "version": "1.0.5",
+  "versionCode": 20,
   "notes": [
-    "Fixes installs being rejected on phones holding earlier 1.0.3 builds.",
-    "Reliable in-app updates that keep your library, downloads, and reading progress."
+    "Reading view is back to native long-press select and copy, tap-to-highlight removed.",
+    "Faster paging and scrolling in downloaded novels."
   ],
   "android": {
     "url": "/downloads/prime-novel-android.apk"
