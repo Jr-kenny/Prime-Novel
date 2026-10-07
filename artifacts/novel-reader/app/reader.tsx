@@ -1,7 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Clipboard from 'expo-clipboard';
-import * as NavigationBar from 'expo-navigation-bar';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SystemUI from 'expo-system-ui';
 import { StatusBar } from 'expo-status-bar';
@@ -659,27 +658,6 @@ export default function ReaderScreen() {
       void SystemUI.setBackgroundColorAsync(palette.background).catch(() => {});
     }
   }, [palette.background]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    void (async () => {
-      try {
-        if (readerPreferences.fullscreen) {
-          await NavigationBar.setVisibilityAsync('hidden');
-          await NavigationBar.setBehaviorAsync('overlay-swipe');
-        } else {
-          await NavigationBar.setVisibilityAsync('visible');
-          await NavigationBar.setBehaviorAsync('inset-swipe');
-        }
-      } catch {
-        // Navigation bar control is best-effort across Android versions.
-      }
-    })();
-    return () => {
-      if (Platform.OS !== 'android') return;
-      void NavigationBar.setVisibilityAsync('visible').catch(() => {});
-    };
-  }, [readerPreferences.fullscreen]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
