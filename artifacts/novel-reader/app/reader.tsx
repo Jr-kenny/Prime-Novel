@@ -456,8 +456,11 @@ export default function ReaderScreen() {
   const chromeVisible = controlsVisible || settingsOpen;
   const immersiveMode = !chromeVisible;
   const chromeTopHeight = insets.top + (Platform.OS === 'web' ? 40 : 10) + 23 + 12;
-  const readerContentTopPadding = immersiveMode ? Math.max(12, insets.top * 0.35) + 18 : chromeTopHeight + 28;
-  const readerContentBottomPadding = immersiveMode ? Math.max(12, insets.bottom * 0.35) + 28 : insets.bottom + 110;
+  // Content padding stays constant whether chrome is visible or not. The bars
+  // are absolute overlays, so varying the padding only made the text jump on
+  // every toggle. Toggling chrome now only fades/slides the bars.
+  const readerContentTopPadding = chromeTopHeight + 28;
+  const readerContentBottomPadding = insets.bottom + 110;
   const isRemoteBook = Boolean(activeBook.sourceUrl);
 
   useEffect(() => {
