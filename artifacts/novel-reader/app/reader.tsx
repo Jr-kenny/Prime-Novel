@@ -454,12 +454,21 @@ export default function ReaderScreen() {
   const hasNextChapter = activeBook.chapter < activeBook.totalChapters;
   const isCurrentChapterRead = isChapterRead(activeBook.chapter);
   const chromeVisible = controlsVisible || settingsOpen;
-  const chromeTopHeight = insets.top + (Platform.OS === 'web' ? 40 : 10) + 23 + 12;
+  // Window insets change when the system bars hide/show. Everything below is
+  // derived from the largest insets ever seen so toggling chrome never moves
+  // content or chrome: only pixels fade, layout stays fixed.
+  const [stableTopInset, setStableTopInset] = useState(insets.top);
+  const [stableBottomInset, setStableBottomInset] = useState(insets.bottom);
+  useEffect(() => {
+    setStableTopInset((value) => Math.max(value, insets.top));
+    setStableBottomInset((value) => Math.max(value, insets.bottom));
+  }, [insets.top, insets.bottom]);
+  const chromeTopHeight = stableTopInset + (Platform.OS === 'web' ? 40 : 10) + 23 + 12;
   // Content padding stays constant whether chrome is visible or not. The bars
   // are absolute overlays, so varying the padding only made the text jump on
   // every toggle. Toggling chrome now only fades/slides the bars.
   const readerContentTopPadding = chromeTopHeight + 28;
-  const readerContentBottomPadding = insets.bottom + 110;
+  const readerContentBottomPadding = stableBottomInset + 110;
   const isRemoteBook = Boolean(activeBook.sourceUrl);
 
   useEffect(() => {
@@ -664,7 +673,7 @@ export default function ReaderScreen() {
     if (Platform.OS !== 'android') return;
     void (async () => {
       try {
-        if (readerPreferences.fullscreen) {
+        if (!chromeVisible) {
           await NavigationBar.setVisibilityAsync('hidden');
           await NavigationBar.setBehaviorAsync('overlay-swipe');
         } else {
@@ -679,7 +688,7 @@ export default function ReaderScreen() {
       if (Platform.OS !== 'android') return;
       void NavigationBar.setVisibilityAsync('visible').catch(() => {});
     };
-  }, [readerPreferences.fullscreen]);
+  }, [chromeVisible]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -960,12 +969,12 @@ export default function ReaderScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: palette.background }]}>
-      <StatusBar backgroundColor={palette.background} hidden={readerPreferences.fullscreen} style={palette.statusBarStyle} />
+      <StatusBar backgroundColor="transparent" hidden={!chromeVisible} style={palette.statusBarStyle} translucent />
       <Animated.View
         pointerEvents={chromeVisible ? 'auto' : 'none'}
         style={[
           styles.topBar,
-          { paddingTop: insets.top + (Platform.OS === 'web' ? 40 : 10), backgroundColor: palette.background },
+          { paddingTop: stableTopInset + (Platform.OS === 'web' ? 40 : 10), backgroundColor: palette.background },
           chromeTopStyle,
         ]}
       >
@@ -1094,7 +1103,7 @@ export default function ReaderScreen() {
         pointerEvents={chromeVisible ? 'auto' : 'none'}
         style={[
           styles.bottomBar,
-          { paddingBottom: insets.bottom + 10, backgroundColor: palette.background },
+          { paddingBottom: stableBottomInset + 10, backgroundColor: palette.background },
           chromeBottomStyle,
         ]}
       >
