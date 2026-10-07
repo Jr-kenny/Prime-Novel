@@ -454,7 +454,6 @@ export default function ReaderScreen() {
   const hasNextChapter = activeBook.chapter < activeBook.totalChapters;
   const isCurrentChapterRead = isChapterRead(activeBook.chapter);
   const chromeVisible = controlsVisible || settingsOpen;
-  const immersiveMode = !chromeVisible;
   const chromeTopHeight = insets.top + (Platform.OS === 'web' ? 40 : 10) + 23 + 12;
   // Content padding stays constant whether chrome is visible or not. The bars
   // are absolute overlays, so varying the padding only made the text jump on
@@ -665,7 +664,7 @@ export default function ReaderScreen() {
     if (Platform.OS !== 'android') return;
     void (async () => {
       try {
-        if (immersiveMode) {
+        if (readerPreferences.fullscreen) {
           await NavigationBar.setVisibilityAsync('hidden');
           await NavigationBar.setBehaviorAsync('overlay-swipe');
         } else {
@@ -680,16 +679,16 @@ export default function ReaderScreen() {
       if (Platform.OS !== 'android') return;
       void NavigationBar.setVisibilityAsync('visible').catch(() => {});
     };
-  }, [immersiveMode]);
+  }, [readerPreferences.fullscreen]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
-    if (immersiveMode) {
+    if (readerPreferences.fullscreen) {
       void document.documentElement.requestFullscreen?.().catch(() => {});
     } else if (document.fullscreenElement) {
       void document.exitFullscreen?.().catch(() => {});
     }
-  }, [immersiveMode]);
+  }, [readerPreferences.fullscreen]);
 
   useEffect(() => {
     if (!readerPreferences.keepScreenAwake) return;
@@ -961,12 +960,7 @@ export default function ReaderScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: palette.background }]}>
-      <StatusBar
-        backgroundColor={palette.background}
-        hidden={immersiveMode}
-        style={palette.statusBarStyle}
-        translucent={immersiveMode}
-      />
+      <StatusBar backgroundColor={palette.background} hidden={readerPreferences.fullscreen} style={palette.statusBarStyle} />
       <Animated.View
         pointerEvents={chromeVisible ? 'auto' : 'none'}
         style={[
