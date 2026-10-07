@@ -1,9 +1,9 @@
 {
-  "version": "1.0.3",
-  "versionCode": 4,
+  "version": "1.0.4",
+  "versionCode": 19,
   "notes": [
-    "Reliable in-app updates that keep your library, downloads, and reading progress.",
-    "Background downloads with resume, plus reading analytics and tap-to-highlight."
+    "Fixes installs being rejected on phones holding earlier 1.0.3 builds.",
+    "Reliable in-app updates that keep your library, downloads, and reading progress."
   ],
   "android": {
     "url": "/downloads/prime-novel-android.apk"
